@@ -1,5 +1,5 @@
 server:
-  address: ":8080"
+  address: "127.0.0.1:9090"
 
 routes:
   - path: /api/
@@ -7,3 +7,6 @@ routes:
 
   - path: /app/
     upstream: http://localhost:4200
+
+  - path: /static/
+    root: ./public

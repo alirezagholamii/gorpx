@@ -7,6 +7,7 @@ type Server struct {
 type Route struct {
 	Path     string `yaml:"path"`
 	Upstream string `yaml:"upstream"`
+	Root     string `yaml:"root"`
 }
 
 type Config struct {

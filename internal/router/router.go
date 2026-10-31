@@ -8,6 +8,7 @@ import (
 
 	"github.com/alirezagholamii/gorpx/internal/config"
 	"github.com/alirezagholamii/gorpx/internal/proxy"
+	"github.com/alirezagholamii/gorpx/internal/static"
 )
 
 func New(routes []config.Route) (http.Handler, error) {
@@ -25,9 +26,24 @@ func New(routes []config.Route) (http.Handler, error) {
 		}
 		seen[route.Path] = true
 
+		hasUpstream := route.Upstream != ""
+		hasRoot := route.Root != ""
+
+		if hasUpstream == hasRoot {
+			return nil, fmt.Errorf(
+				"route %q must define either upstream or root",
+				route.Path,
+			)
+		}
+
+		if hasRoot {
+			mux.Handle(route.Path, static.New(route.Path, route.Root))
+			continue
+		}
+
 		target, err := url.Parse(route.Upstream)
 		if err != nil {
-			return nil, fmt.Errorf("parse upstream %q: %w", route.Upstream, err)
+			return nil, fmt.Errorf("parse upstream: %w", err)
 		}
 
 		if (target.Scheme != "http" && target.Scheme != "https") ||
