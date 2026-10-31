@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 
@@ -10,7 +11,17 @@ import (
 )
 
 func main() {
-	cfg := config.Default()
+	configPath := flag.String(
+		"config",
+		"gorpx.yaml",
+		"path to configuration file",
+	)
+	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	srv, err := server.New(cfg)
 	if err != nil {

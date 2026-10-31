@@ -1,0 +1,47 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gorpx.yaml")
+
+	data := []byte(`
+server:
+  address: ":9090"
+
+routes:
+  - path: /api/
+    upstream: http://localhost:3000
+`)
+
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Server.Address != ":9090" {
+		t.Errorf(
+			"address = %q, want :9090",
+			cfg.Server.Address,
+		)
+	}
+
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("routes = %d, want 1", len(cfg.Routes))
+	}
+
+	if cfg.Routes[0].Path != "/api/" {
+		t.Errorf(
+			"path = %q, want /api/",
+			cfg.Routes[0].Path,
+		)
+	}
+}

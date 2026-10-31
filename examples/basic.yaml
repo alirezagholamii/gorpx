@@ -1,0 +1,9 @@
+server:
+  address: ":8080"
+
+routes:
+  - path: /api/
+    upstream: http://localhost:3000
+
+  - path: /app/
+    upstream: http://localhost:4200
