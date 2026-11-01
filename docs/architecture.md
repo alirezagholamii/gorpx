@@ -89,6 +89,6 @@ go test -race ./...
 
 Gorpx uses Go's standard library wherever possible. External dependencies should be introduced only when they provide clear value.
 
-## Licence
+## License
 
 ISC License.

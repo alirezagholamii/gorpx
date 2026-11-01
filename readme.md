@@ -80,6 +80,6 @@ Run tests with race detection:
 go test -race ./...
 ```
 
-## Licence
+## License
 
 Gorpx is licensed under the [ISC License](LICENSE).

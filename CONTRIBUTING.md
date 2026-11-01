@@ -62,6 +62,6 @@ For larger features or architectural changes, consider opening an issue for disc
 
 Please avoid publishing sensitive security vulnerabilities in public issues. Until a private reporting channel is configured, contact the maintainer privately.
 
-## Licence
+## License
 
 By contributing, you agree that your contributions will be distributed under the project's ISC License.
