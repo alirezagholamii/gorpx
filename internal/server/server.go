@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
 	"github.com/alirezagholamii/gorpx/internal/router"
@@ -27,7 +28,9 @@ func New(cfg config.Config) (*http.Server, error) {
 	mux.Handle("/", routes)
 
 	return &http.Server{
-		Addr:    cfg.Server.Address,
-		Handler: mux,
+		Addr:              cfg.Server.Address,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}, nil
 }
