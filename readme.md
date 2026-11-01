@@ -1,43 +1,85 @@
 # Gorpx
 
-**Gorpx** (Go Reverse Proxy) is a lightweight, open-source HTTP reverse proxy and web server written in Go.
+**Gorpx (Go Reverse Proxy)** is a lightweight, open-source HTTP reverse proxy and static web server written in Go.
 
-Designed for simplicity, performance, and reliability, Gorpx makes it easy to route HTTP traffic, serve static files, and manage backend services with minimal configuration.
+Built for simplicity, Gorpx provides configurable routing, structured logging, and basic server lifecycle management with minimal dependencies.
+
+> **Status:** Experimental. Gorpx is under active development and has not yet been hardened for public-facing production deployments.
 
 ## Features
 
 - HTTP reverse proxy
 - Path-based routing
+- YAML configuration
 - Static file serving
-- YAML-based configuration
 - Structured request logging
 - Graceful shutdown
-- Lightweight with minimal dependencies
+- Basic upstream error handling
 
-> **Status:** 🚧 Early development. Features listed above are planned for the initial release.
+## Getting Started
 
-## Example Configuration
+### Requirements
+
+- Go 1.22 or later (use the version specified in `go.mod`)
+
+### Installation
+
+Clone the repository and build Gorpx:
+
+```bash
+git clone https://github.com/alirezagholamii/gorpx.git
+cd gorpx
+go build -o gorpx ./cmd/gorpx
+```
+
+### Configuration
+
+Create a file named `gorpx.yaml`:
 
 ```yaml
 server:
-  address: ":8080"
+  address: "127.0.0.1:8080"
 
 routes:
   - path: /api/
     upstream: http://localhost:3000
 
-  - path: /
-    upstream: http://localhost:4200
+  - path: /static/
+    root: ./public
 ```
 
-## Getting Started
+### Run
 
-Installation and usage instructions will be available with the first release.
+```bash
+./gorpx -config gorpx.yaml
+```
 
-## Contributing
+Gorpx will listen on `127.0.0.1:8080`.
 
-Contributions, bug reports, and feature suggestions are welcome.
+Requests to `/api/` are forwarded to the configured upstream. Requests to `/static/` are served from the local `public` directory.
 
-## License
+Routes preserve their incoming URL prefix when proxying. For example, `/api/users` is forwarded as `/api/users`.
+
+## Documentation
+
+- [Configuration](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Contributing](CONTRIBUTING.md)
+
+## Development
+
+Run the test suite:
+
+```bash
+go test ./...
+```
+
+Run tests with race detection:
+
+```bash
+go test -race ./...
+```
+
+## Licence
 
 Gorpx is licensed under the [ISC License](LICENSE).
