@@ -2,10 +2,12 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
+	"github.com/alirezagholamii/gorpx/internal/middleware"
 	"github.com/alirezagholamii/gorpx/internal/router"
 )
 
@@ -29,7 +31,7 @@ func New(cfg config.Config) (*http.Server, error) {
 
 	return &http.Server{
 		Addr:              cfg.Server.Address,
-		Handler:           mux,
+		Handler:           middleware.Logging(mux, slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}, nil
