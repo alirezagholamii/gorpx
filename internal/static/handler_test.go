@@ -41,3 +41,42 @@ func TestStaticFile(t *testing.T) {
 		t.Errorf("body = %q, want %q", got, content)
 	}
 }
+
+func TestDirectoryListingDisabled(t *testing.T) {
+	dir := t.TempDir()
+
+	err := os.Mkdir(
+		filepath.Join(dir, "images"),
+		0755,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = os.WriteFile(
+		filepath.Join(dir, "images", "logo.png"),
+		[]byte("test image"),
+		0644,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := New("/static/", dir)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/static/images/",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf(
+			"status = %d, want 403",
+			rec.Code,
+		)
+	}
+}
