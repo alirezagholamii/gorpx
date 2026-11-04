@@ -4,10 +4,11 @@ import "net/http"
 
 func New(prefix, root string) http.Handler {
 	fs := fileSystem{
-		FileSystem: http.Dir(root),
+		root: root,
 	}
 
-	fileServer := http.FileServer(fs)
-
-	return http.StripPrefix(prefix, fileServer)
+	return http.StripPrefix(
+		prefix,
+		http.FileServer(fs),
+	)
 }

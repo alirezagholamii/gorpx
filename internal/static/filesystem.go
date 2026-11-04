@@ -1,18 +1,30 @@
 package static
 
 import (
+	"errors"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type fileSystem struct {
-	http.FileSystem
+	root string
 }
 
 func (fs fileSystem) Open(name string) (http.File, error) {
-	file, err := fs.FileSystem.Open(name)
+	name = strings.TrimPrefix(name, "/")
+
+	if name == "" {
+		name = "."
+	}
+
+	file, err := os.OpenInRoot(fs.root, name)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, os.ErrNotExist
+		}
+
+		return nil, os.ErrPermission
 	}
 
 	info, err := file.Stat()
@@ -22,6 +34,11 @@ func (fs fileSystem) Open(name string) (http.File, error) {
 	}
 
 	if info.IsDir() {
+		file.Close()
+		return nil, os.ErrPermission
+	}
+
+	if !info.Mode().IsRegular() {
 		file.Close()
 		return nil, os.ErrPermission
 	}
