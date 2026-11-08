@@ -3,7 +3,12 @@ package static
 import "net/http"
 
 func New(prefix, root string) http.Handler {
-	fileServer := http.FileServer(http.Dir(root))
+	fs := fileSystem{
+		root: root,
+	}
 
-	return http.StripPrefix(prefix, fileServer)
+	return http.StripPrefix(
+		prefix,
+		http.FileServer(fs),
+	)
 }
