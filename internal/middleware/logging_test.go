@@ -104,31 +104,31 @@ func TestLoggingSupportsFlush(t *testing.T) {
 }
 
 func TestLoggingInformationalResponse(t *testing.T) {
-    var output bytes.Buffer
+	var output bytes.Buffer
 
-    logger := slog.New(slog.NewJSONHandler(&output, nil))
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
 
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusEarlyHints)
-        w.WriteHeader(http.StatusOK)
-    })
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusOK)
+	})
 
-    server := httptest.NewServer(Logging(handler, logger))
-    defer server.Close()
+	server := httptest.NewServer(Logging(handler, logger))
+	defer server.Close()
 
-    resp, err := server.Client().Get(server.URL)
-    if err != nil {
-        t.Fatal(err)
-    }
-    defer resp.Body.Close()
+	resp, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        t.Errorf("status = %d, want 200", resp.StatusCode)
-    }
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
 
-    if !strings.Contains(output.String(), `"status":200`) {
-        t.Errorf("incorrect log: %s", output.String())
-    }
+	if !strings.Contains(output.String(), `"status":200`) {
+		t.Errorf("incorrect log: %s", output.String())
+	}
 }
 
 func TestLoggingImplicitStatus(t *testing.T) {
