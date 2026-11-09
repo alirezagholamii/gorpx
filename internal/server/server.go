@@ -12,6 +12,10 @@ import (
 )
 
 func New(cfg config.Config) (*http.Server, error) {
+	if err := config.Validate(cfg); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	routes, err := router.New(cfg.Routes)
 	if err != nil {
 		return nil, fmt.Errorf("create router: %w", err)

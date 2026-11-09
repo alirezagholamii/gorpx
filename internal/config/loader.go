@@ -31,12 +31,8 @@ func Load(path string) (Config, error) {
 		)
 	}
 
-	if cfg.Server.Address == "" {
-		return Config{}, fmt.Errorf("server address is required")
-	}
-
-	if len(cfg.Routes) == 0 {
-		return Config{}, fmt.Errorf("at least one route is required")
+	if err := Validate(cfg); err != nil {
+		return Config{}, fmt.Errorf("validate config: %w", err)
 	}
 
 	return cfg, nil

@@ -37,6 +37,13 @@ func TestHandler(t *testing.T) {
 
 	cfg := config.Default()
 
+	cfg.Routes = []config.Route{
+		{
+			Path:     "/api/",
+			Upstream: "http://localhost:3000",
+		},
+	}
+
 	srv, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
