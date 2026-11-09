@@ -58,6 +58,34 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "exactly one",
 		},
+		{
+			name: "empty server address",
+			modify: func(cfg *Config) {
+				cfg.Server.Address = ""
+			},
+			wantErr: "invalid server address",
+		},
+		{
+			name: "missing upstream scheme",
+			modify: func(cfg *Config) {
+				cfg.Routes[0].Upstream = "localhost:3000"
+			},
+			wantErr: "invalid upstream",
+		},
+		{
+			name: "empty upstream hostname",
+			modify: func(cfg *Config) {
+				cfg.Routes[0].Upstream = "http://"
+			},
+			wantErr: "invalid upstream",
+		},
+		{
+			name: "invalid route prefix",
+			modify: func(cfg *Config) {
+				cfg.Routes[0].Path = "api/"
+			},
+			wantErr: "invalid route path",
+		},
 	}
 
 	for _, tt := range tests {
