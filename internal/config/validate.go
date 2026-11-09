@@ -96,14 +96,6 @@ func Validate(cfg Config) error {
 				}
 			}
 
-			if err != nil {
-				return fmt.Errorf(
-					"route %q: invalid upstream: %w",
-					route.Path,
-					err,
-				)
-			}
-
 			if (target.Scheme != "http" && target.Scheme != "https") ||
 				target.Hostname() == "" ||
 				target.User != nil ||
