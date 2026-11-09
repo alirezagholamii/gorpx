@@ -35,7 +35,7 @@ func TestIntegration(t *testing.T) {
 	// Configure Gorpx.
 	cfg := config.Config{
 		Server: config.Server{
-			Address: ":0",
+			Address: "127.0.0.1:8080",
 		},
 		Routes: []config.Route{
 			{
