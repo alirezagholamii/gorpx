@@ -12,13 +12,25 @@ type responseWriter struct {
 }
 
 func (w *responseWriter) WriteHeader(status int) {
+	// Informational responses don't finalise the status,
+	// except 101 Switching Protocols.
+	if status >= 100 && status < 200 && status != 101 {
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
+
+	// Record only the first final status.
+	if w.status != 0 {
+		return
+	}
+
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *responseWriter) Write(data []byte) (int, error) {
 	if w.status == 0 {
-		w.status = http.StatusOK
+		w.WriteHeader(http.StatusOK)
 	}
 
 	return w.ResponseWriter.Write(data)

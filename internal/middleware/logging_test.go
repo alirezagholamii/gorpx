@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -41,5 +42,114 @@ func TestLogging(t *testing.T) {
 		if !strings.Contains(logOutput, expected) {
 			t.Errorf("log missing %q", expected)
 		}
+	}
+}
+
+func TestLoggingKeepsFirstStatus(t *testing.T) {
+	var output bytes.Buffer
+
+	logger := slog.New(
+		slog.NewJSONHandler(&output, nil),
+	)
+
+	handler := http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+
+	Logging(handler, logger).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+
+	if !strings.Contains(output.String(), `"status":201`) {
+		t.Errorf("incorrect status log: %s", output.String())
+	}
+}
+
+func TestLoggingSupportsFlush(t *testing.T) {
+	logger := slog.New(
+		slog.NewJSONHandler(io.Discard, nil),
+	)
+
+	handler := http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("event: hello\n\n"))
+
+			err := http.NewResponseController(w).Flush()
+			if err != nil {
+				t.Errorf("flush failed: %v", err)
+			}
+		},
+	)
+
+	req := httptest.NewRequest("GET", "/events", nil)
+	rec := httptest.NewRecorder()
+
+	Logging(handler, logger).ServeHTTP(rec, req)
+
+	if !rec.Flushed {
+		t.Error("response was not flushed")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestLoggingInformationalResponse(t *testing.T) {
+	var output bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	server := httptest.NewServer(Logging(handler, logger))
+	defer server.Close()
+
+	resp, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if !strings.Contains(output.String(), `"status":200`) {
+		t.Errorf("incorrect log: %s", output.String())
+	}
+}
+
+func TestLoggingImplicitStatus(t *testing.T) {
+	var output bytes.Buffer
+
+	logger := slog.New(
+		slog.NewJSONHandler(&output, nil),
+	)
+
+	handler := http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("Hello"))
+		},
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	Logging(handler, logger).ServeHTTP(rec, req)
+
+	if !strings.Contains(output.String(), `"status":200`) {
+		t.Errorf("incorrect log: %s", output.String())
 	}
 }
