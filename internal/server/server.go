@@ -34,9 +34,12 @@ func New(cfg config.Config) (*http.Server, error) {
 	mux.Handle("/", routes)
 
 	return &http.Server{
-		Addr:              cfg.Server.Address,
-		Handler:           middleware.Logging(mux, slog.Default()),
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		Addr: cfg.Server.Address,
+		Handler: middleware.Logging(
+			middleware.BodyLimit(mux),
+			slog.Default(),
+		), ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 16 << 10,
 	}, nil
 }

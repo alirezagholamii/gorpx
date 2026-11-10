@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
 )
@@ -119,5 +121,85 @@ func TestIntegration(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestIntegrationStreamedBodyLimit(t *testing.T) {
+	received := make(chan int64, 1)
+
+	// Backend counts the bytes it actually receives.
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			n, _ := io.Copy(io.Discard, r.Body)
+			received <- n
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstream.URL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	// Send one byte more than the 10 MiB limit.
+	body := strings.NewReader(
+		strings.Repeat("x", (10<<20)+1),
+	)
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		gorpx.URL+"/api/upload",
+		body,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force an unknown-length, chunked request.
+	req.ContentLength = -1
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+
+	// The proxy may close the connection after the limit
+	// is exceeded. A transport error is acceptable here.
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	// Check what actually reached the upstream.
+	select {
+	case n := <-received:
+		if n > 10<<20 {
+			t.Errorf(
+				"upstream received %d bytes, limit is %d",
+				n,
+				10<<20,
+			)
+		}
+
+		t.Logf("upstream received %d bytes", n)
+
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not finish reading")
 	}
 }
