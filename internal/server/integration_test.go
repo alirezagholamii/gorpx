@@ -271,3 +271,71 @@ func TestIntegrationUpstreamUnavailable(t *testing.T) {
 		)
 	}
 }
+
+func TestIntegrationUpstreamTimeout(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+				return
+
+			case <-time.After(20 * time.Second):
+				w.WriteHeader(http.StatusOK)
+			}
+		},
+	))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstream.URL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	client := &http.Client{
+		Timeout: 25 * time.Second,
+	}
+
+	resp, err := client.Get(gorpx.URL + "/api/slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf(
+			"status = %d, want %d",
+			resp.StatusCode,
+			http.StatusBadGateway,
+		)
+	}
+
+	// Verify Gorpx remains responsive.
+	health, err := client.Get(gorpx.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer health.Body.Close()
+
+	if health.StatusCode != http.StatusOK {
+		t.Errorf(
+			"health status = %d, want %d",
+			health.StatusCode,
+			http.StatusOK,
+		)
+	}
+}
