@@ -7,12 +7,44 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func Validate(cfg Config) error {
 	_, port, err := net.SplitHostPort(cfg.Server.Address)
 	if err != nil {
 		return fmt.Errorf("invalid server address: %w", err)
+	}
+
+	timeouts := []struct {
+		name  string
+		value string
+	}{
+		{"read_header_timeout", cfg.Server.ReadHeaderTimeout},
+		{"idle_timeout", cfg.Server.IdleTimeout},
+	}
+
+	for _, timeout := range timeouts {
+		if timeout.value == "" {
+			continue
+		}
+
+		duration, err := time.ParseDuration(timeout.value)
+		if err != nil {
+			return fmt.Errorf(
+				"invalid %s %q: %w",
+				timeout.name,
+				timeout.value,
+				err,
+			)
+		}
+
+		if duration <= 0 {
+			return fmt.Errorf(
+				"%s must be greater than zero",
+				timeout.name,
+			)
+		}
 	}
 
 	number, err := strconv.Atoi(port)

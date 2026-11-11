@@ -79,6 +79,47 @@ Only use directories containing files intended for public access. The current im
 - Upstream URLs must use `http` or `https`.
 - Upstream URLs currently cannot include custom paths, query strings, fragments or user information.
 
+## Server timeouts
+
+Gorpx supports configurable HTTP server timeouts.
+
+```yaml
+server:
+  address: ":8080"
+  read_header_timeout: 5s
+  idle_timeout: 60s
+```
+
+Both timeout settings are optional.
+
+| Setting               | Default | Description                                                               |
+| --------------------- | ------- | ------------------------------------------------------------------------- |
+| `read_header_timeout` | `5s`    | Maximum time allowed to read incoming HTTP request headers                |
+| `idle_timeout`        | `60s`   | Maximum time to wait for another request on an idle keep-alive connection |
+
+### Supported duration formats
+
+Timeout values use Go duration syntax:
+
+- `500ms` — 500 milliseconds
+- `10s` — 10 seconds
+- `2m` — 2 minutes
+- `1h` — 1 hour
+
+Timeout values must be greater than zero. Invalid or negative durations cause Gorpx to reject the configuration at startup.
+
+### Backwards compatibility
+
+Existing configuration files that omit timeout settings continue to work.
+
+Gorpx applies the default values of `5s` and `60s`.
+
+### Streaming
+
+These settings do not impose a maximum duration on an entire proxied request or response.
+
+Gorpx deliberately avoids a general write timeout for now to preserve streaming behaviour.
+
 ## Limitations
 
 - No automatic HTTPS or certificate management.
