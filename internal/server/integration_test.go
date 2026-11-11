@@ -203,3 +203,71 @@ func TestIntegrationStreamedBodyLimit(t *testing.T) {
 		t.Fatal("upstream did not finish reading")
 	}
 }
+
+func TestIntegrationUpstreamUnavailable(t *testing.T) {
+	// Start an upstream to obtain a valid address.
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+
+	upstreamURL := upstream.URL
+
+	// Stop the upstream before sending a request.
+	upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstreamURL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Request a resource from the unavailable upstream.
+	resp, err := client.Get(gorpx.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf(
+			"status = %d, want %d",
+			resp.StatusCode,
+			http.StatusBadGateway,
+		)
+	}
+
+	// Verify that Gorpx continues handling requests.
+	health, err := client.Get(gorpx.URL + "/health")
+	if err != nil {
+		t.Fatalf("health check failed: %v", err)
+	}
+	defer health.Body.Close()
+
+	if health.StatusCode != http.StatusOK {
+		t.Errorf(
+			"health status = %d, want %d",
+			health.StatusCode,
+			http.StatusOK,
+		)
+	}
+}
