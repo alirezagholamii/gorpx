@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -201,5 +202,266 @@ func TestIntegrationStreamedBodyLimit(t *testing.T) {
 
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream did not finish reading")
+	}
+}
+
+func TestIntegrationUpstreamUnavailable(t *testing.T) {
+	// Start an upstream to obtain a valid address.
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+
+	upstreamURL := upstream.URL
+
+	// Stop the upstream before sending a request.
+	upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstreamURL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Request a resource from the unavailable upstream.
+	resp, err := client.Get(gorpx.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf(
+			"status = %d, want %d",
+			resp.StatusCode,
+			http.StatusBadGateway,
+		)
+	}
+
+	// Verify that Gorpx continues handling requests.
+	health, err := client.Get(gorpx.URL + "/health")
+	if err != nil {
+		t.Fatalf("health check failed: %v", err)
+	}
+	defer health.Body.Close()
+
+	if health.StatusCode != http.StatusOK {
+		t.Errorf(
+			"health status = %d, want %d",
+			health.StatusCode,
+			http.StatusOK,
+		)
+	}
+}
+
+func TestIntegrationUpstreamTimeout(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+				return
+
+			case <-time.After(20 * time.Second):
+				w.WriteHeader(http.StatusOK)
+			}
+		},
+	))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstream.URL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	client := &http.Client{
+		Timeout: 25 * time.Second,
+	}
+
+	resp, err := client.Get(gorpx.URL + "/api/slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf(
+			"status = %d, want %d",
+			resp.StatusCode,
+			http.StatusBadGateway,
+		)
+	}
+
+	// Verify Gorpx remains responsive.
+	health, err := client.Get(gorpx.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer health.Body.Close()
+
+	if health.StatusCode != http.StatusOK {
+		t.Errorf(
+			"health status = %d, want %d",
+			health.StatusCode,
+			http.StatusOK,
+		)
+	}
+}
+
+func TestIntegrationStaticSecurity(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "public")
+
+	if err := os.Mkdir(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(root, "safe.txt"),
+		[]byte("safe content"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(base, "secret.txt"),
+		[]byte("PRIVATE_SECRET"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(
+		"safe.txt",
+		filepath.Join(root, "internal-link.txt"),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(
+		"../secret.txt",
+		filepath.Join(root, "escape-link.txt"),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path: "/static/",
+				Root: root,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "regular file",
+			path:       "/static/safe.txt",
+			wantStatus: http.StatusOK,
+			wantBody:   "safe content",
+		},
+		{
+			name:       "internal symlink",
+			path:       "/static/internal-link.txt",
+			wantStatus: http.StatusOK,
+			wantBody:   "safe content",
+		},
+		{
+			name:       "escaping symlink",
+			path:       "/static/escape-link.txt",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "directory listing disabled",
+			path:       "/static/",
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := gorpx.Client().Get(gorpx.URL + tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf(
+					"status = %d, want %d",
+					resp.StatusCode,
+					tt.wantStatus,
+				)
+			}
+
+			if tt.wantBody != "" &&
+				string(body) != tt.wantBody {
+				t.Errorf(
+					"body = %q, want %q",
+					body,
+					tt.wantBody,
+				)
+			}
+
+			if bytes.Contains(body, []byte("PRIVATE_SECRET")) {
+				t.Fatal("security failure: secret file exposed")
+			}
+		})
 	}
 }
