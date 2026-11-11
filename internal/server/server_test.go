@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
 )
@@ -115,5 +116,73 @@ func TestMaxHeaderBytes(t *testing.T) {
 			"status = %d, want 431",
 			resp.StatusCode,
 		)
+	}
+}
+
+func TestServerTimeouts(t *testing.T) {
+	tests := []struct {
+		name       string
+		header     string
+		idle       string
+		wantHeader time.Duration
+		wantIdle   time.Duration
+	}{
+		{
+			name:       "custom timeouts",
+			header:     "10s",
+			idle:       "2m",
+			wantHeader: 10 * time.Second,
+			wantIdle:   2 * time.Minute,
+		},
+		{
+			name:       "default timeouts",
+			wantHeader: 5 * time.Second,
+			wantIdle:   60 * time.Second,
+		},
+		{
+			name:       "partial override",
+			header:     "20s",
+			wantHeader: 20 * time.Second,
+			wantIdle:   60 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Config{
+				Server: config.Server{
+					Address:           ":8080",
+					ReadHeaderTimeout: tt.header,
+					IdleTimeout:       tt.idle,
+				},
+				Routes: []config.Route{
+					{
+						Path:     "/api/",
+						Upstream: "http://localhost:3000",
+					},
+				},
+			}
+
+			srv, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if srv.ReadHeaderTimeout != tt.wantHeader {
+				t.Errorf(
+					"ReadHeaderTimeout = %v, want %v",
+					srv.ReadHeaderTimeout,
+					tt.wantHeader,
+				)
+			}
+
+			if srv.IdleTimeout != tt.wantIdle {
+				t.Errorf(
+					"IdleTimeout = %v, want %v",
+					srv.IdleTimeout,
+					tt.wantIdle,
+				)
+			}
+		})
 	}
 }

@@ -15,7 +15,7 @@ func Load(path string) (Config, error) {
 	}
 	defer file.Close()
 
-	cfg := Default()
+	var cfg Config
 
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
@@ -30,6 +30,8 @@ func Load(path string) (Config, error) {
 			"config must contain exactly one YAML document",
 		)
 	}
+
+	cfg = ApplyDefaults(cfg)
 
 	if err := Validate(cfg); err != nil {
 		return Config{}, fmt.Errorf("validate config: %w", err)

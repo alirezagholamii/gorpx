@@ -1,7 +1,9 @@
 package config
 
 type Server struct {
-	Address string `yaml:"address"`
+	Address           string `yaml:"address"`
+	ReadHeaderTimeout string `yaml:"read_header_timeout"`
+	IdleTimeout       string `yaml:"idle_timeout"`
 }
 
 type Route struct {
@@ -18,7 +20,9 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Server: Server{
-			Address: ":8080",
+			Address:           ":8080",
+			ReadHeaderTimeout: "5s",
+			IdleTimeout:       "60s",
 		},
 	}
 }

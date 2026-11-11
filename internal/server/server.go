@@ -12,8 +12,24 @@ import (
 )
 
 func New(cfg config.Config) (*http.Server, error) {
+	cfg = config.ApplyDefaults(cfg)
+
 	if err := config.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	readHeaderTimeout, err := time.ParseDuration(
+		cfg.Server.ReadHeaderTimeout,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("parse read header timeout: %w", err)
+	}
+
+	idleTimeout, err := time.ParseDuration(
+		cfg.Server.IdleTimeout,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("parse idle timeout: %w", err)
 	}
 
 	routes, err := router.New(cfg.Routes)
@@ -38,8 +54,9 @@ func New(cfg config.Config) (*http.Server, error) {
 		Handler: middleware.Logging(
 			middleware.BodyLimit(mux),
 			slog.Default(),
-		), ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:    60 * time.Second,
-		MaxHeaderBytes: 16 << 10,
+		),
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    16 << 10,
 	}, nil
 }

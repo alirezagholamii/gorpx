@@ -218,3 +218,55 @@ func TestValidateUpstream(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateServerTimeouts(t *testing.T) {
+	tests := []struct {
+		name    string
+		field   string
+		value   string
+		wantErr bool
+	}{
+		{"valid seconds", "read_header", "5s", false},
+		{"valid minutes", "idle", "1m", false},
+		{"valid milliseconds", "read_header", "500ms", false},
+		{"empty read timeout", "read_header", "", false},
+		{"empty idle timeout", "idle", "", false},
+		{"invalid duration", "read_header", "hello", true},
+		{"missing unit", "idle", "5", true},
+		{"zero duration", "read_header", "0s", true},
+		{"negative duration", "idle", "-5s", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Server: Server{
+					Address: ":8080",
+				},
+				Routes: []Route{
+					{
+						Path:     "/api/",
+						Upstream: "http://localhost:3000",
+					},
+				},
+			}
+
+			switch tt.field {
+			case "read_header":
+				cfg.Server.ReadHeaderTimeout = tt.value
+			case "idle":
+				cfg.Server.IdleTimeout = tt.value
+			}
+
+			err := Validate(cfg)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf(
+					"Validate() error = %v, wantErr %v",
+					err,
+					tt.wantErr,
+				)
+			}
+		})
+	}
+}

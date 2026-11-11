@@ -45,3 +45,40 @@ routes:
 		)
 	}
 }
+
+func TestLoadDefaultTimeouts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := []byte(`
+server:
+  address: ":8080"
+
+routes:
+  - path: /api/
+    upstream: http://localhost:3000
+`)
+
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Server.ReadHeaderTimeout != "5s" {
+		t.Errorf(
+			"ReadHeaderTimeout = %q, want 5s",
+			cfg.Server.ReadHeaderTimeout,
+		)
+	}
+
+	if cfg.Server.IdleTimeout != "60s" {
+		t.Errorf(
+			"IdleTimeout = %q, want 60s",
+			cfg.Server.IdleTimeout,
+		)
+	}
+}
