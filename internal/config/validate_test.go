@@ -270,3 +270,67 @@ func TestValidateServerTimeouts(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRequestLimits(t *testing.T) {
+	tests := []struct {
+		name       string
+		headerSize int
+		bodySize   int64
+		wantErr    bool
+	}{
+		{
+			name: "default values",
+		},
+		{
+			name:       "custom values",
+			headerSize: 32 << 10,
+			bodySize:   20 << 20,
+		},
+		{
+			name:       "negative header limit",
+			headerSize: -1,
+			wantErr:    true,
+		},
+		{
+			name:     "negative body limit",
+			bodySize: -1,
+			wantErr:  true,
+		},
+		{
+			name:       "both negative",
+			headerSize: -1,
+			bodySize:   -1,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Server: Server{
+					Address:        ":8080",
+					MaxHeaderBytes: tt.headerSize,
+					MaxBodyBytes:   tt.bodySize,
+				},
+				Routes: []Route{
+					{
+						Path:     "/api/",
+						Upstream: "http://localhost:3000",
+					},
+				},
+			}
+
+			cfg = ApplyDefaults(cfg)
+
+			err := Validate(cfg)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf(
+					"Validate() error = %v, wantErr %v",
+					err,
+					tt.wantErr,
+				)
+			}
+		})
+	}
+}

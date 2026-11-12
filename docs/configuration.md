@@ -120,6 +120,50 @@ These settings do not impose a maximum duration on an entire proxied request or 
 
 Gorpx deliberately avoids a general write timeout for now to preserve streaming behaviour.
 
+## HTTP request size limits
+
+Gorpx supports configurable HTTP request-header and body-size limits.
+
+```yaml
+server:
+  address: ":8080"
+  max_header_bytes: 16384
+  max_body_bytes: 10485760
+```
+
+Both settings are optional.
+
+| Setting | Default | Description |
+|---|---|---|
+| `max_header_bytes` | 16384 (16 KiB) | Maximum HTTP request-header size in bytes |
+| `max_body_bytes` | 10485760 (10 MiB) | Maximum HTTP request-body size in bytes |
+
+### Configuration rules
+
+- Values must be non-negative integers representing bytes.
+- Omitting a setting uses its default value.
+- Setting a value to `0` also uses the default.
+- Negative values are rejected during configuration validation.
+- Values such as `10MB` are not supported.
+
+### Request-body behaviour
+
+Requests with a declared `Content-Length` greater than `max_body_bytes` are rejected with HTTP 413 (Request Entity Too Large).
+
+For requests with an unknown body size, Gorpx enforces the limit while streaming the body.
+
+Gorpx does not buffer complete request bodies in memory.
+
+If a streamed request exceeds the limit after forwarding has begun, the client may receive a transport error or a different HTTP status, such as 502.
+
+The upstream server may receive part of the request before the limit is reached.
+
+### Header limits
+
+Gorpx uses Go's `http.Server.MaxHeaderBytes` setting to limit incoming request headers.
+
+The HTTP server may use a small amount of additional internal buffering beyond the configured header limit.
+
 ## Limitations
 
 - No automatic HTTPS or certificate management.

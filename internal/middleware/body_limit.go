@@ -2,11 +2,9 @@ package middleware
 
 import "net/http"
 
-const MaxBodyBytes int64 = 10 << 20 // 10 MiB
-
-func BodyLimit(next http.Handler) http.Handler {
+func BodyLimit(next http.Handler, maxBytes int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ContentLength > MaxBodyBytes {
+		if r.ContentLength > maxBytes {
 			http.Error(
 				w,
 				"Request body too large",
@@ -15,7 +13,7 @@ func BodyLimit(next http.Handler) http.Handler {
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 
 		next.ServeHTTP(w, r)
 	})

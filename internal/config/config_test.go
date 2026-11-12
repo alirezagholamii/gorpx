@@ -19,6 +19,22 @@ func TestDefault(t *testing.T) {
 		)
 	}
 
+	if cfg.Server.MaxHeaderBytes != 16<<10 {
+		t.Errorf(
+			"MaxHeaderBytes = %d, want %d",
+			cfg.Server.MaxHeaderBytes,
+			16<<10,
+		)
+	}
+
+	if cfg.Server.MaxBodyBytes != 10<<20 {
+		t.Errorf(
+			"MaxBodyBytes = %d, want %d",
+			cfg.Server.MaxBodyBytes,
+			10<<20,
+		)
+	}
+
 	if cfg.Server.Address != ":8080" {
 		t.Errorf(
 			"default address = %q, want %q",

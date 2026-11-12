@@ -82,3 +82,42 @@ routes:
 		)
 	}
 }
+
+func TestLoadDefaultRequestLimits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := []byte(`
+server:
+  address: ":8080"
+
+routes:
+  - path: /api/
+    upstream: http://localhost:3000
+`)
+
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Server.MaxHeaderBytes != 16<<10 {
+		t.Errorf(
+			"MaxHeaderBytes = %d, want %d",
+			cfg.Server.MaxHeaderBytes,
+			16<<10,
+		)
+	}
+
+	if cfg.Server.MaxBodyBytes != 10<<20 {
+		t.Errorf(
+			"MaxBodyBytes = %d, want %d",
+			cfg.Server.MaxBodyBytes,
+			10<<20,
+		)
+	}
+}
