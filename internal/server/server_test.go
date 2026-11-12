@@ -186,3 +186,51 @@ func TestServerTimeouts(t *testing.T) {
 		})
 	}
 }
+
+func TestServerMaxHeaderBytes(t *testing.T) {
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{
+			name:      "default limit",
+			wantLimit: 16 << 10,
+		},
+		{
+			name:      "custom limit",
+			limit:     32 << 10,
+			wantLimit: 32 << 10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Config{
+				Server: config.Server{
+					Address:        ":8080",
+					MaxHeaderBytes: tt.limit,
+				},
+				Routes: []config.Route{
+					{
+						Path:     "/api/",
+						Upstream: "http://localhost:3000",
+					},
+				},
+			}
+
+			srv, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if srv.MaxHeaderBytes != tt.wantLimit {
+				t.Errorf(
+					"MaxHeaderBytes = %d, want %d",
+					srv.MaxHeaderBytes,
+					tt.wantLimit,
+				)
+			}
+		})
+	}
+}

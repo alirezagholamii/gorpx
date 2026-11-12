@@ -52,11 +52,11 @@ func New(cfg config.Config) (*http.Server, error) {
 	return &http.Server{
 		Addr: cfg.Server.Address,
 		Handler: middleware.Logging(
-			middleware.BodyLimit(mux),
+			middleware.BodyLimit(mux, cfg.Server.MaxBodyBytes),
 			slog.Default(),
 		),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
-		MaxHeaderBytes:    16 << 10,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
 	}, nil
 }

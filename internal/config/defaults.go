@@ -13,5 +13,13 @@ func ApplyDefaults(cfg Config) Config {
 			defaults.Server.IdleTimeout
 	}
 
+	if cfg.Server.MaxHeaderBytes == 0 {
+		cfg.Server.MaxHeaderBytes = defaults.Server.MaxHeaderBytes
+	}
+
+	if cfg.Server.MaxBodyBytes == 0 {
+		cfg.Server.MaxBodyBytes = defaults.Server.MaxBodyBytes
+	}
+
 	return cfg
 }

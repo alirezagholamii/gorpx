@@ -47,6 +47,20 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	if cfg.Server.MaxHeaderBytes < 0 {
+		return fmt.Errorf(
+			"max_header_bytes must not be negative: %d",
+			cfg.Server.MaxHeaderBytes,
+		)
+	}
+
+	if cfg.Server.MaxBodyBytes < 0 {
+		return fmt.Errorf(
+			"max_body_bytes must not be negative: %d",
+			cfg.Server.MaxBodyBytes,
+		)
+	}
+
 	number, err := strconv.Atoi(port)
 	if err != nil || number < 1 || number > 65535 {
 		return fmt.Errorf("invalid server port: %q", port)

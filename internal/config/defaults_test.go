@@ -68,3 +68,50 @@ func TestApplyDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyRequestLimitDefaults(t *testing.T) {
+	cfg := ApplyDefaults(Config{})
+
+	if cfg.Server.MaxHeaderBytes != 16<<10 {
+		t.Errorf(
+			"MaxHeaderBytes = %d, want %d",
+			cfg.Server.MaxHeaderBytes,
+			16<<10,
+		)
+	}
+
+	if cfg.Server.MaxBodyBytes != 10<<20 {
+		t.Errorf(
+			"MaxBodyBytes = %d, want %d",
+			cfg.Server.MaxBodyBytes,
+			10<<20,
+		)
+	}
+}
+
+func TestApplyCustomRequestLimits(t *testing.T) {
+	cfg := Config{
+		Server: Server{
+			MaxHeaderBytes: 32 << 10,
+			MaxBodyBytes:   20 << 20,
+		},
+	}
+
+	result := ApplyDefaults(cfg)
+
+	if result.Server.MaxHeaderBytes != 32<<10 {
+		t.Errorf(
+			"MaxHeaderBytes = %d, want %d",
+			result.Server.MaxHeaderBytes,
+			32<<10,
+		)
+	}
+
+	if result.Server.MaxBodyBytes != 20<<20 {
+		t.Errorf(
+			"MaxBodyBytes = %d, want %d",
+			result.Server.MaxBodyBytes,
+			20<<20,
+		)
+	}
+}
