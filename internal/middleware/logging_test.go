@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -200,5 +201,62 @@ func TestClientIP(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestLoggingRequestID(t *testing.T) {
+	var logs bytes.Buffer
+
+	logger := slog.New(
+		slog.NewJSONHandler(&logs, nil),
+	)
+
+	next := RequestID(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+
+	handler := Logging(next, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	responseID := rec.Header().Get("X-Request-ID")
+	if responseID == "" {
+		t.Fatal("response missing request ID")
+	}
+
+	var entry struct {
+		RequestID string `json:"request_id"`
+		Status    int    `json:"status"`
+		Method    string `json:"method"`
+		Path      string `json:"path"`
+	}
+
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatalf("decode log: %v", err)
+	}
+
+	if entry.RequestID != responseID {
+		t.Errorf(
+			"logged request ID = %q, response ID = %q",
+			entry.RequestID,
+			responseID,
+		)
+	}
+
+	if entry.Status != http.StatusOK {
+		t.Errorf("logged status = %d, want 200", entry.Status)
+	}
+
+	if entry.Method != http.MethodGet {
+		t.Errorf("logged method = %q, want GET", entry.Method)
+	}
+
+	if entry.Path != "/api/test" {
+		t.Errorf("logged path = %q, want /api/test", entry.Path)
 	}
 }
