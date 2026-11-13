@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -151,5 +152,111 @@ func TestLoggingImplicitStatus(t *testing.T) {
 
 	if !strings.Contains(output.String(), `"status":200`) {
 		t.Errorf("incorrect log: %s", output.String())
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		want       string
+	}{
+		{
+			name:       "IPv4",
+			remoteAddr: "192.168.1.10:54321",
+			want:       "192.168.1.10",
+		},
+		{
+			name:       "IPv6",
+			remoteAddr: "[::1]:54321",
+			want:       "::1",
+		},
+		{
+			name:       "IPv6 full address",
+			remoteAddr: "[2001:db8::1]:443",
+			want:       "2001:db8::1",
+		},
+		{
+			name:       "missing port",
+			remoteAddr: "192.168.1.10",
+			want:       "192.168.1.10",
+		},
+		{
+			name:       "empty address",
+			remoteAddr: "",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clientIP(tt.remoteAddr)
+
+			if got != tt.want {
+				t.Errorf(
+					"clientIP(%q) = %q, want %q",
+					tt.remoteAddr,
+					got,
+					tt.want,
+				)
+			}
+		})
+	}
+}
+
+func TestLoggingRequestID(t *testing.T) {
+	var logs bytes.Buffer
+
+	logger := slog.New(
+		slog.NewJSONHandler(&logs, nil),
+	)
+
+	next := RequestID(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+
+	handler := Logging(next, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	responseID := rec.Header().Get("X-Request-ID")
+	if responseID == "" {
+		t.Fatal("response missing request ID")
+	}
+
+	var entry struct {
+		RequestID string `json:"request_id"`
+		Status    int    `json:"status"`
+		Method    string `json:"method"`
+		Path      string `json:"path"`
+	}
+
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatalf("decode log: %v", err)
+	}
+
+	if entry.RequestID != responseID {
+		t.Errorf(
+			"logged request ID = %q, response ID = %q",
+			entry.RequestID,
+			responseID,
+		)
+	}
+
+	if entry.Status != http.StatusOK {
+		t.Errorf("logged status = %d, want 200", entry.Status)
+	}
+
+	if entry.Method != http.MethodGet {
+		t.Errorf("logged method = %q, want GET", entry.Method)
+	}
+
+	if entry.Path != "/api/test" {
+		t.Errorf("logged path = %q, want /api/test", entry.Path)
 	}
 }

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -58,8 +59,19 @@ func Logging(next http.Handler, logger *slog.Logger) http.Handler {
 		logger.InfoContext(r.Context(), "HTTP request",
 			"method", r.Method,
 			"path", r.URL.Path,
-			"status", status,
+			"status", recorder.status,
 			"duration_ms", time.Since(start).Milliseconds(),
+			"client_ip", clientIP(r.RemoteAddr),
+			"request_id", r.Header.Get("X-Request-ID"),
 		)
 	})
+}
+
+func clientIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+
+	return host
 }

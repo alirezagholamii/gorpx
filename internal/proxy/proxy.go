@@ -20,22 +20,16 @@ func New(target *url.URL) http.Handler {
 			r.SetXForwarded()
 		},
 
-		ErrorHandler: func(
-			w http.ResponseWriter,
-			r *http.Request,
-			err error,
-		) {
-			slog.ErrorContext(
-				r.Context(),
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Error(
 				"upstream request failed",
+				"upstream", target.Host,
+				"path", r.URL.Path,
+				"request_id", r.Header.Get("X-Request-ID"),
 				"error", err,
 			)
 
-			http.Error(
-				w,
-				"Bad Gateway",
-				http.StatusBadGateway,
-			)
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
 	}
 }

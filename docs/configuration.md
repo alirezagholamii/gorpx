@@ -133,10 +133,10 @@ server:
 
 Both settings are optional.
 
-| Setting | Default | Description |
-|---|---|---|
-| `max_header_bytes` | 16384 (16 KiB) | Maximum HTTP request-header size in bytes |
-| `max_body_bytes` | 10485760 (10 MiB) | Maximum HTTP request-body size in bytes |
+| Setting            | Default           | Description                               |
+| ------------------ | ----------------- | ----------------------------------------- |
+| `max_header_bytes` | 16384 (16 KiB)    | Maximum HTTP request-header size in bytes |
+| `max_body_bytes`   | 10485760 (10 MiB) | Maximum HTTP request-body size in bytes   |
 
 ### Configuration rules
 
@@ -163,6 +163,33 @@ The upstream server may receive part of the request before the limit is reached.
 Gorpx uses Go's `http.Server.MaxHeaderBytes` setting to limit incoming request headers.
 
 The HTTP server may use a small amount of additional internal buffering beyond the configured header limit.
+
+## HTTP request logging
+
+Gorpx uses Go's `log/slog` package for structured HTTP request logging.
+
+Access logs include:
+
+| Field         | Description                                |
+| ------------- | ------------------------------------------ |
+| `method`      | HTTP request method                        |
+| `path`        | Request URL path                           |
+| `status`      | HTTP response status code                  |
+| `duration_ms` | Request duration in milliseconds           |
+| `client_ip`   | IP address of the direct client connection |
+| `request_id`  | Gorpx-generated request correlation ID     |
+
+Gorpx generates a unique request ID for each incoming request.
+
+The ID is returned to clients using the `X-Request-ID` response header and forwarded to upstream services.
+
+Client-provided request IDs are replaced by Gorpx-generated identifiers.
+
+When an upstream request fails, Gorpx records an error log containing the upstream host, request path, request ID and error details.
+
+Gorpx does not intentionally log request bodies, authorisation headers or URL query parameters in its access logs.
+
+The `client_ip` field is derived from the direct connection address rather than untrusted forwarding headers.
 
 ## Limitations
 
