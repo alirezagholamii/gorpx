@@ -3,6 +3,8 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"regexp"
 	"testing"
 )
@@ -67,5 +69,82 @@ func TestRequestIDUnique(t *testing.T) {
 		}
 
 		seen[id] = true
+	}
+}
+
+func TestRequestIDInformationalResponse(t *testing.T) {
+	handler := RequestID(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusEarlyHints)
+
+			w.Header().Set(requestIDHeader, "incorrect-id")
+
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var earlyID string
+
+	client := server.Client()
+	client.Transport = &http.Transport{}
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		server.URL,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	trace := &httptrace.ClientTrace{
+		Got1xxResponse: func(
+			code int,
+			header textproto.MIMEHeader,
+		) error {
+			if code == http.StatusEarlyHints {
+				earlyID = header.Get(requestIDHeader)
+			}
+			return nil
+		},
+	}
+
+	req = req.WithContext(
+		httptrace.WithClientTrace(req.Context(), trace),
+	)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	finalID := resp.Header.Get(requestIDHeader)
+
+	if earlyID == "" {
+		t.Fatal("103 response missing request ID")
+	}
+
+	if finalID == "" {
+		t.Fatal("final response missing request ID")
+	}
+
+	if earlyID != finalID {
+		t.Errorf(
+			"early ID = %q, final ID = %q",
+			earlyID,
+			finalID,
+		)
+	}
+
+	if finalID == "incorrect-id" {
+		t.Error("request ID was overwritten")
 	}
 }

@@ -2,7 +2,9 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -535,6 +537,109 @@ func TestIntegrationRequestID(t *testing.T) {
 			"response ID = %q, upstream received ID = %q",
 			responseID,
 			upstreamID,
+		)
+	}
+}
+
+func TestIntegrationUpstreamErrorRequestID(t *testing.T) {
+	// Capture structured logs.
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	originalLogger := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(originalLogger)
+
+	// Create an upstream, then shut it down.
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {},
+	))
+	upstreamURL := upstream.URL
+	upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstreamURL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	client := gorpx.Client()
+	client.Timeout = 5 * time.Second
+
+	resp, err := client.Get(gorpx.URL + "/api/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf(
+			"status = %d, want 502",
+			resp.StatusCode,
+		)
+	}
+
+	responseID := resp.Header.Get("X-Request-ID")
+	if responseID == "" {
+		t.Fatal("response missing request ID")
+	}
+
+	// Decode each JSON log entry.
+	var accessID, errorID string
+
+	for _, line := range bytes.Split(
+		bytes.TrimSpace(logs.Bytes()),
+		[]byte("\n"),
+	) {
+		var entry struct {
+			Message   string `json:"msg"`
+			RequestID string `json:"request_id"`
+			Status    int    `json:"status"`
+		}
+
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatalf("decode log: %v", err)
+		}
+
+		switch entry.Message {
+		case "HTTP request":
+			if entry.Status != http.StatusBadGateway {
+				t.Errorf("logged status = %d, want 502", entry.Status)
+			}
+			accessID = entry.RequestID
+
+		case "upstream request failed":
+			errorID = entry.RequestID
+		}
+	}
+
+	if accessID != responseID {
+		t.Errorf(
+			"access log ID = %q, response ID = %q",
+			accessID,
+			responseID,
+		)
+	}
+
+	if errorID != responseID {
+		t.Errorf(
+			"error log ID = %q, response ID = %q",
+			errorID,
+			responseID,
 		)
 	}
 }
