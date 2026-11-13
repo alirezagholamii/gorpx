@@ -465,3 +465,76 @@ func TestIntegrationStaticSecurity(t *testing.T) {
 		})
 	}
 }
+
+func TestIntegrationRequestID(t *testing.T) {
+	var upstreamID string
+
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			upstreamID = r.Header.Get("X-Request-ID")
+
+			w.Header().Set("X-Request-ID", "upstream-id")
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:     "/api/",
+				Upstream: upstream.URL,
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		gorpx.URL+"/api/test",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Set("X-Request-ID", "client-id")
+
+	resp, err := gorpx.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	responseID := resp.Header.Get("X-Request-ID")
+
+	if responseID == "" {
+		t.Fatal("missing response request ID")
+	}
+
+	if responseID == "client-id" {
+		t.Error("client-provided request ID was trusted")
+	}
+
+	if responseID == "upstream-id" {
+		t.Error("upstream overwrote Gorpx request ID")
+	}
+
+	if responseID != upstreamID {
+		t.Errorf(
+			"response ID = %q, upstream received ID = %q",
+			responseID,
+			upstreamID,
+		)
+	}
+}
