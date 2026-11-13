@@ -153,3 +153,52 @@ func TestLoggingImplicitStatus(t *testing.T) {
 		t.Errorf("incorrect log: %s", output.String())
 	}
 }
+
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		want       string
+	}{
+		{
+			name:       "IPv4",
+			remoteAddr: "192.168.1.10:54321",
+			want:       "192.168.1.10",
+		},
+		{
+			name:       "IPv6",
+			remoteAddr: "[::1]:54321",
+			want:       "::1",
+		},
+		{
+			name:       "IPv6 full address",
+			remoteAddr: "[2001:db8::1]:443",
+			want:       "2001:db8::1",
+		},
+		{
+			name:       "missing port",
+			remoteAddr: "192.168.1.10",
+			want:       "192.168.1.10",
+		},
+		{
+			name:       "empty address",
+			remoteAddr: "",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clientIP(tt.remoteAddr)
+
+			if got != tt.want {
+				t.Errorf(
+					"clientIP(%q) = %q, want %q",
+					tt.remoteAddr,
+					got,
+					tt.want,
+				)
+			}
+		})
+	}
+}

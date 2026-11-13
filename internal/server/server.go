@@ -52,7 +52,9 @@ func New(cfg config.Config) (*http.Server, error) {
 	return &http.Server{
 		Addr: cfg.Server.Address,
 		Handler: middleware.Logging(
-			middleware.BodyLimit(mux, cfg.Server.MaxBodyBytes),
+			middleware.RequestID(
+				middleware.BodyLimit(mux, cfg.Server.MaxBodyBytes),
+			),
 			slog.Default(),
 		),
 		ReadHeaderTimeout: readHeaderTimeout,
