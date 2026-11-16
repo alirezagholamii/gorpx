@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
 	"github.com/alirezagholamii/gorpx/internal/proxy"
@@ -55,7 +56,29 @@ func New(routes []config.Route) (http.Handler, error) {
 			return nil, fmt.Errorf("invalid upstream: %q", route.Upstream)
 		}
 
-		mux.Handle(route.Path, proxy.New(target))
+		responseHeaderTimeout := 15 * time.Second
+
+		if route.ResponseHeaderTimeout != "" {
+			parsed, err := time.ParseDuration(route.ResponseHeaderTimeout)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"route %q: parse response header timeout: %w",
+					route.Path,
+					err,
+				)
+			}
+
+			if parsed <= 0 {
+				return nil, fmt.Errorf(
+					"route %q: response header timeout must be positive",
+					route.Path,
+				)
+			}
+
+			responseHeaderTimeout = parsed
+		}
+
+		mux.Handle(route.Path, proxy.New(target, responseHeaderTimeout))
 	}
 
 	return mux, nil

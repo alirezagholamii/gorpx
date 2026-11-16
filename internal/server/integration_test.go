@@ -643,3 +643,80 @@ func TestIntegrationUpstreamErrorRequestID(t *testing.T) {
 		)
 	}
 }
+
+func TestIntegrationRouteSpecificTimeouts(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-time.After(200 * time.Millisecond):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("upstream response"))
+
+			case <-r.Context().Done():
+				return
+			}
+		},
+	))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:                  "/fast/",
+				Upstream:              upstream.URL,
+				ResponseHeaderTimeout: "50ms",
+			},
+			{
+				Path:                  "/slow/",
+				Upstream:              upstream.URL,
+				ResponseHeaderTimeout: "1s",
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+	}{
+		{
+			name:       "short timeout",
+			path:       "/fast/test",
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name:       "long timeout",
+			path:       "/slow/test",
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := gorpx.Client().Get(gorpx.URL + tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf(
+					"status = %d, want %d",
+					resp.StatusCode,
+					tt.wantStatus,
+				)
+			}
+		})
+	}
+}

@@ -92,6 +92,32 @@ func Validate(cfg Config) error {
 			)
 		}
 
+		if hasRoot && route.ResponseHeaderTimeout != "" {
+			return fmt.Errorf(
+				"route %q: response_header_timeout is only valid for upstream routes",
+				route.Path,
+			)
+		}
+
+		if route.ResponseHeaderTimeout != "" {
+			duration, err := time.ParseDuration(route.ResponseHeaderTimeout)
+			if err != nil {
+				return fmt.Errorf(
+					"route %q: invalid response_header_timeout %q: %w",
+					route.Path,
+					route.ResponseHeaderTimeout,
+					err,
+				)
+			}
+
+			if duration <= 0 {
+				return fmt.Errorf(
+					"route %q: response_header_timeout must be greater than zero",
+					route.Path,
+				)
+			}
+		}
+
 		if hasRoot {
 			info, err := os.Stat(route.Root)
 			if err != nil {

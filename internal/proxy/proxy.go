@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-func New(target *url.URL) http.Handler {
+func New(target *url.URL, responseHeaderTimeout time.Duration) http.Handler {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 15 * time.Second
+	transport.ResponseHeaderTimeout = responseHeaderTimeout
 
 	return &httputil.ReverseProxy{
 		Transport: transport,

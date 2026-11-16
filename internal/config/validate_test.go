@@ -334,3 +334,73 @@ func TestValidateRequestLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateResponseHeaderTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout string
+		wantErr bool
+	}{
+		{"omitted", "", false},
+		{"seconds", "30s", false},
+		{"minutes", "2m", false},
+		{"milliseconds", "500ms", false},
+		{"zero", "0s", true},
+		{"negative", "-5s", true},
+		{"invalid", "hello", true},
+		{"missing unit", "30", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Server: Server{
+					Address: ":8080",
+				},
+				Routes: []Route{
+					{
+						Path:                  "/api/",
+						Upstream:              "http://localhost:3000",
+						ResponseHeaderTimeout: tt.timeout,
+					},
+				},
+			}
+
+			cfg = ApplyDefaults(cfg)
+
+			err := Validate(cfg)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf(
+					"Validate() error = %v, wantErr %v",
+					err,
+					tt.wantErr,
+				)
+			}
+		})
+	}
+}
+
+func TestValidateStaticRouteTimeout(t *testing.T) {
+	cfg := Config{
+		Server: Server{
+			Address: ":8080",
+		},
+		Routes: []Route{
+			{
+				Path:                  "/static/",
+				Root:                  t.TempDir(),
+				ResponseHeaderTimeout: "30s",
+			},
+		},
+	}
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for static route timeout")
+	}
+
+	if !strings.Contains(err.Error(), "only valid for upstream routes") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
