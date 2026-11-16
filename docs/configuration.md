@@ -191,6 +191,54 @@ Gorpx does not intentionally log request bodies, authorisation headers or URL qu
 
 The `client_ip` field is derived from the direct connection address rather than untrusted forwarding headers.
 
+## Upstream response-header timeout
+
+Gorpx allows each reverse-proxy route to configure its own upstream response-header timeout.
+
+```yaml
+routes:
+  - path: /api/
+    upstream: http://localhost:3000
+    response_header_timeout: 30s
+
+  - path: /reports/
+    upstream: http://localhost:4000
+    response_header_timeout: 2m
+```
+
+### Configuration
+
+| Setting                   | Default | Description                                        |
+| ------------------------- | ------- | -------------------------------------------------- |
+| `response_header_timeout` | `15s`   | Maximum time to wait for upstream response headers |
+
+The setting is optional and applies only to reverse-proxy routes.
+
+Supported values follow Go's duration syntax, including `500ms`, `15s`, `1m` and `2m`.
+
+Timeout values must be greater than zero. Invalid, zero or negative values cause Gorpx to reject the configuration at startup.
+
+### Behaviour
+
+If the upstream does not return response headers before the configured timeout expires, Gorpx returns HTTP 502 Bad Gateway.
+
+The timeout does not limit the time required to stream the upstream response body.
+
+### Static routes
+
+`response_header_timeout` is not supported for static-file routes.
+
+For example, the following configuration is invalid:
+
+```yaml
+routes:
+  - path: /static/
+    root: ./public
+    response_header_timeout: 30s
+```
+
+Existing configurations that omit the timeout continue to use the default of 15 seconds.
+
 ## Limitations
 
 - No automatic HTTPS or certificate management.
