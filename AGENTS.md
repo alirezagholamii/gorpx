@@ -99,6 +99,6 @@ Keep `README.md`, `docs/architecture.md`, and `docs/configuration.md` consistent
 
 Document actual behaviour rather than planned functionality.
 
-## Licence
+## License
 
-Gorpx is licensed under the ISC License. Preserve existing copyright and licence notices.
+Gorpx is licensed under the ISC License. Preserve existing copyright and license notices.
