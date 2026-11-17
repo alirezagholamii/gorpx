@@ -15,7 +15,9 @@ server:
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
+      - http://localhost:3001
 `)
 
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -38,6 +40,10 @@ routes:
 		t.Fatalf("routes = %d, want 1", len(cfg.Routes))
 	}
 
+	if got := cfg.Routes[0].Upstreams; len(got) != 2 || got[0] != "http://localhost:3000" || got[1] != "http://localhost:3001" {
+		t.Errorf("upstreams = %v, want both configured destinations in order", got)
+	}
+
 	if cfg.Routes[0].Path != "/api/" {
 		t.Errorf(
 			"path = %q, want /api/",
@@ -56,7 +62,8 @@ server:
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
 `)
 
 	if err := os.WriteFile(path, content, 0600); err != nil {
@@ -93,7 +100,8 @@ server:
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
 `)
 
 	if err := os.WriteFile(path, content, 0600); err != nil {

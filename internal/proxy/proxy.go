@@ -8,27 +8,27 @@ import (
 	"time"
 )
 
-func New(target *url.URL, responseHeaderTimeout time.Duration) http.Handler {
+func New(targets []*url.URL, responseHeaderTimeout time.Duration) http.Handler {
+	selector := newRoundRobin(targets)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = responseHeaderTimeout
 
-	return &httputil.ReverseProxy{
-		Transport: transport,
+	loggedTransport := &loggingTransport{
+		base:   transport,
+		logger: slog.Default(),
+	}
 
-		Rewrite: func(r *httputil.ProxyRequest) {
-			r.SetURL(target)
-			r.SetXForwarded()
+	return &httputil.ReverseProxy{
+		Transport: loggedTransport,
+
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			target := selector.Next()
+
+			pr.SetURL(target)
+			pr.SetXForwarded()
 		},
 
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			slog.Error(
-				"upstream request failed",
-				"upstream", target.Host,
-				"path", r.URL.Path,
-				"request_id", r.Header.Get("X-Request-ID"),
-				"error", err,
-			)
-
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
 	}

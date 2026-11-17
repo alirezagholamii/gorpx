@@ -25,7 +25,7 @@ func TestProxy(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/proxy/hello", nil)
 	rec := httptest.NewRecorder()
 
-	New(target, 15*time.Second).ServeHTTP(rec, req)
+	New([]*url.URL{target}, 15*time.Second).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -50,7 +50,7 @@ func TestUnavailableUpstream(t *testing.T) {
 
 	backend.Close()
 
-	handler := New(target, 15*time.Second)
+	handler := New([]*url.URL{target}, 15*time.Second)
 
 	req := httptest.NewRequest(
 		http.MethodGet,
@@ -97,7 +97,7 @@ func TestForwardedFor(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 
-	New(target, 15*time.Second).ServeHTTP(rec, req)
+	New([]*url.URL{target}, 15*time.Second).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -129,7 +129,7 @@ func TestResponseHeaderTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler := New(target, 20*time.Millisecond)
+	handler := New([]*url.URL{target}, 20*time.Millisecond)
 
 	req := httptest.NewRequest(
 		http.MethodGet,

@@ -16,10 +16,12 @@ server:
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
 
   - path: /app/
-    upstream: http://localhost:4200
+    upstreams:
+      - http://localhost:4200
 
   - path: /static/
     root: ./public
@@ -42,7 +44,7 @@ Each route contains a `path` and exactly one destination.
 | Field      | Description                                    |
 | ---------- | ---------------------------------------------- |
 | `path`     | URL path prefix, beginning and ending with `/` |
-| `upstream` | Destination HTTP or HTTPS server               |
+| `upstreams` | List of HTTP or HTTPS destinations               |
 | `root`     | Local directory containing static files        |
 
 ### Reverse proxy
@@ -50,12 +52,13 @@ Each route contains a `path` and exactly one destination.
 ```yaml
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
 ```
 
 A request to `/api/users` is forwarded to `http://localhost:3000/api/users`.
 
-Gorpx currently preserves the incoming request path.
+Gorpx currently forwards requests to the first entry in `upstreams` and preserves the incoming request path. Additional entries are validated but are not used for load balancing or failover.
 
 ### Static files
 
@@ -75,7 +78,7 @@ Only use directories containing files intended for public access. The current im
 
 - Route paths must start and end with `/`.
 - Duplicate route paths are rejected.
-- Each route must define either `upstream` or `root`, but not both.
+- Each route must define either `upstreams` or `root`, but not both.
 - Upstream URLs must use `http` or `https`.
 - Upstream URLs currently cannot include custom paths, query strings, fragments or user information.
 
@@ -198,11 +201,13 @@ Gorpx allows each reverse-proxy route to configure its own upstream response-hea
 ```yaml
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
     response_header_timeout: 30s
 
   - path: /reports/
-    upstream: http://localhost:4000
+    upstreams:
+      - http://localhost:4000
     response_header_timeout: 2m
 ```
 

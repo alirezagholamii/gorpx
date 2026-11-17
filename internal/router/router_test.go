@@ -25,8 +25,8 @@ func TestRouting(t *testing.T) {
 	defer app.Close()
 
 	handler, err := New([]config.Route{
-		{Path: "/api/", Upstream: api.URL},
-		{Path: "/app/", Upstream: app.URL},
+		{Path: "/api/", Upstreams: []string{api.URL, app.URL}},
+		{Path: "/app/", Upstreams: []string{app.URL}},
 	})
 	if err != nil {
 		t.Fatal(err)

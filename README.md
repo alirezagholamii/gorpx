@@ -42,7 +42,8 @@ server:
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
 
   - path: /static/
     root: ./public

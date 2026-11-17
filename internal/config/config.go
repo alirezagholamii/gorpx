@@ -9,10 +9,10 @@ type Server struct {
 }
 
 type Route struct {
-	Path                  string `yaml:"path"`
-	Upstream              string `yaml:"upstream"`
-	Root                  string `yaml:"root"`
-	ResponseHeaderTimeout string `yaml:"response_header_timeout"`
+	Path                  string   `yaml:"path"`
+	Upstreams             []string `yaml:"upstreams"`
+	Root                  string   `yaml:"root"`
+	ResponseHeaderTimeout string   `yaml:"response_header_timeout"`
 }
 
 type Config struct {
