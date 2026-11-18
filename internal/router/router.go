@@ -18,9 +18,8 @@ func New(routes []config.Route) (http.Handler, error) {
 	seen := make(map[string]bool)
 
 	for _, route := range routes {
-		if !strings.HasPrefix(route.Path, "/") ||
-			!strings.HasSuffix(route.Path, "/") {
-			return nil, fmt.Errorf("invalid route path: %q", route.Path)
+		if err := config.ValidateRoutePath(route.Path); err != nil {
+			return nil, err
 		}
 
 		if seen[route.Path] {

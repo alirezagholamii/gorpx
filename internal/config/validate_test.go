@@ -58,6 +58,16 @@ func TestValidate(t *testing.T) {
 			wantErr: "duplicate route",
 		},
 		{
+			name: "equivalent escaped route",
+			modify: func(cfg *Config) {
+				cfg.Routes = append(cfg.Routes, Route{
+					Path:      "/%61pi/",
+					Upstreams: []string{"http://localhost:3001"},
+				})
+			},
+			wantErr: "must not contain percent escapes",
+		},
+		{
 			name: "invalid upstream scheme",
 			modify: func(cfg *Config) {
 				cfg.Routes[0].Upstreams = []string{"ftp://localhost:3000"}

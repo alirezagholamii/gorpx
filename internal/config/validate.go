@@ -73,6 +73,10 @@ func Validate(cfg Config) error {
 	seen := make(map[string]bool)
 
 	for _, route := range cfg.Routes {
+		if err := ValidateRoutePath(route.Path); err != nil {
+			return err
+		}
+
 		if !strings.HasPrefix(route.Path, "/") ||
 			!strings.HasSuffix(route.Path, "/") {
 			return fmt.Errorf("invalid route path: %q", route.Path)
