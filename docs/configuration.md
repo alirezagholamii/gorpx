@@ -13,13 +13,21 @@ Specify the configuration file when starting the application:
 ```yaml
 server:
   address: "127.0.0.1:8080"
+  read_header_timeout: 5s
+  idle_timeout: 60s
+  max_header_bytes: 16384
+  max_body_bytes: 10485760
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
+      - http://localhost:3001
+    response_header_timeout: 15s
 
   - path: /app/
-    upstream: http://localhost:4200
+    upstreams:
+      - http://localhost:4200
 
   - path: /static/
     root: ./public
@@ -27,35 +35,79 @@ routes:
 
 ## Server
 
-| Field            | Description                             |
-| ---------------- | --------------------------------------- |
+| Field | Description |
+|---|---|
 | `server.address` | Address and port on which Gorpx listens |
 
-If the address is omitted, Gorpx uses the current default of `:8080`.
+If the address is omitted, Gorpx uses the default of `:8080`.
 
 For local development, prefer `127.0.0.1:8080` to avoid exposing the listener on external network interfaces.
 
 ## Routes
 
-Each route contains a `path` and exactly one destination.
+Each route contains a `path` and exactly one destination type.
 
-| Field      | Description                                    |
-| ---------- | ---------------------------------------------- |
-| `path`     | URL path prefix, beginning and ending with `/` |
-| `upstream` | Destination HTTP or HTTPS server               |
-| `root`     | Local directory containing static files        |
+| Field | Description |
+|---|---|
+| `path` | URL path prefix, beginning and ending with `/` |
+| `upstreams` | Non-empty list of HTTP or HTTPS destinations |
+| `root` | Local directory containing static files |
+| `response_header_timeout` | Optional timeout for reverse-proxy routes |
+
+Routes use literal URL path prefixes. Wildcard patterns are not supported.
 
 ### Reverse proxy
 
 ```yaml
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
 ```
 
 A request to `/api/users` is forwarded to `http://localhost:3000/api/users`.
 
-Gorpx currently preserves the incoming request path.
+Gorpx preserves the incoming request path.
+
+The `upstreams` field must contain at least one URL, even when a route has only one backend.
+
+### Round-robin load balancing
+
+Gorpx supports multiple upstream servers using round-robin load balancing.
+
+```yaml
+routes:
+  - path: /api/
+    upstreams:
+      - http://localhost:3000
+      - http://localhost:3001
+      - http://localhost:3002
+```
+
+For sequential requests, Gorpx selects upstreams in the following order:
+
+| Request | Selected upstream |
+|---|---|
+| 1 | `localhost:3000` |
+| 2 | `localhost:3001` |
+| 3 | `localhost:3002` |
+| 4 | `localhost:3000` |
+| 5 | `localhost:3001` |
+| 6 | `localhost:3002` |
+
+Each route maintains an independent, concurrency-safe round-robin selector.
+
+Under concurrent traffic, selection remains balanced, but responses may complete in a different order.
+
+**Failure behaviour:**
+
+- Gorpx does not currently perform active upstream health checks.
+- Unavailable upstreams remain in the round-robin rotation.
+- Connection failures and upstream response-header timeouts normally result in HTTP 502 Bad Gateway.
+- Gorpx does not automatically retry failed requests against another upstream.
+- Requests are not automatically replayed, including POST requests.
+
+Round-robin distributes requests by selection count. It does not consider backend load, response times or connection counts.
 
 ### Static files
 
@@ -69,15 +121,51 @@ A request to `/static/style.css` serves `./public/style.css`.
 
 Relative filesystem paths are resolved from the process's working directory.
 
-Only use directories containing files intended for public access. The current implementation may serve directory listings.
+Static-file serving is restricted to the configured root directory. Directory listings are disabled, and paths that escape the configured root through symbolic links are rejected.
+
+Only use directories containing files intended for public access.
 
 ## Route validation
 
+Gorpx validates routes at startup.
+
 - Route paths must start and end with `/`.
+- Route paths must use supported literal-prefix syntax; wildcard patterns are rejected.
 - Duplicate route paths are rejected.
-- Each route must define either `upstream` or `root`, but not both.
-- Upstream URLs must use `http` or `https`.
-- Upstream URLs currently cannot include custom paths, query strings, fragments or user information.
+- Each route must define exactly one of `upstreams` or `root`.
+- The `upstreams` list must contain at least one URL.
+- Every upstream URL must use `http` or `https`.
+- Upstream URLs cannot contain custom base paths, query strings, fragments or user information.
+- Explicit upstream ports must be valid TCP port numbers.
+- Static-file roots must exist and be directories.
+- `response_header_timeout` is allowed only on reverse-proxy routes.
+
+Invalid configurations cause Gorpx to return an error during startup.
+
+### Breaking configuration change in v0.4.0
+
+Gorpx v0.4.0 uses `upstreams` for all reverse-proxy routes.
+
+The previous singular `upstream` field is no longer supported.
+
+Old configuration:
+
+```yaml
+routes:
+  - path: /api/
+    upstream: http://localhost:3000
+```
+
+New configuration:
+
+```yaml
+routes:
+  - path: /api/
+    upstreams:
+      - http://localhost:3000
+```
+
+Existing configuration files must be updated to use the new format.
 
 ## Server timeouts
 
@@ -92,10 +180,10 @@ server:
 
 Both timeout settings are optional.
 
-| Setting               | Default | Description                                                               |
-| --------------------- | ------- | ------------------------------------------------------------------------- |
-| `read_header_timeout` | `5s`    | Maximum time allowed to read incoming HTTP request headers                |
-| `idle_timeout`        | `60s`   | Maximum time to wait for another request on an idle keep-alive connection |
+| Setting | Default | Description |
+|---|---|---|
+| `read_header_timeout` | `5s` | Maximum time allowed to read incoming HTTP request headers |
+| `idle_timeout` | `60s` | Maximum time to wait for another request on an idle keep-alive connection |
 
 ### Supported duration formats
 
@@ -106,13 +194,11 @@ Timeout values use Go duration syntax:
 - `2m` — 2 minutes
 - `1h` — 1 hour
 
-Timeout values must be greater than zero. Invalid or negative durations cause Gorpx to reject the configuration at startup.
+Timeout values must be greater than zero. Invalid, zero or negative durations cause Gorpx to reject the configuration at startup.
 
-### Backwards compatibility
+### Default values
 
-Existing configuration files that omit timeout settings continue to work.
-
-Gorpx applies the default values of `5s` and `60s`.
+Configurations that omit timeout settings use the defaults of `5s` and `60s`.
 
 ### Streaming
 
@@ -133,10 +219,10 @@ server:
 
 Both settings are optional.
 
-| Setting            | Default           | Description                               |
-| ------------------ | ----------------- | ----------------------------------------- |
-| `max_header_bytes` | 16384 (16 KiB)    | Maximum HTTP request-header size in bytes |
-| `max_body_bytes`   | 10485760 (10 MiB) | Maximum HTTP request-body size in bytes   |
+| Setting | Default | Description |
+|---|---|---|
+| `max_header_bytes` | 16384 (16 KiB) | Maximum HTTP request-header size in bytes |
+| `max_body_bytes` | 10485760 (10 MiB) | Maximum HTTP request-body size in bytes |
 
 ### Configuration rules
 
@@ -148,7 +234,7 @@ Both settings are optional.
 
 ### Request-body behaviour
 
-Requests with a declared `Content-Length` greater than `max_body_bytes` are rejected with HTTP 413 (Request Entity Too Large).
+Requests with a declared `Content-Length` greater than `max_body_bytes` are rejected with HTTP 413 Content Too Large.
 
 For requests with an unknown body size, Gorpx enforces the limit while streaming the body.
 
@@ -170,22 +256,46 @@ Gorpx uses Go's `log/slog` package for structured HTTP request logging.
 
 Access logs include:
 
-| Field         | Description                                |
-| ------------- | ------------------------------------------ |
-| `method`      | HTTP request method                        |
-| `path`        | Request URL path                           |
-| `status`      | HTTP response status code                  |
-| `duration_ms` | Request duration in milliseconds           |
-| `client_ip`   | IP address of the direct client connection |
-| `request_id`  | Gorpx-generated request correlation ID     |
+| Field | Description |
+|---|---|
+| `method` | HTTP request method |
+| `path` | Request URL path |
+| `status` | HTTP response status code |
+| `duration_ms` | Request duration in milliseconds |
+| `client_ip` | IP address of the direct client connection |
+| `request_id` | Gorpx-generated request correlation ID |
+| `aborted` | Whether the handler terminated through a panic, including an aborted response |
 
 Gorpx generates a unique request ID for each incoming request.
 
-The ID is returned to clients using the `X-Request-ID` response header and forwarded to upstream services.
+The ID is returned to clients through the `X-Request-ID` response header and forwarded to upstream services.
 
 Client-provided request IDs are replaced by Gorpx-generated identifiers.
 
-When an upstream request fails, Gorpx records an error log containing the upstream host, request path, request ID and error details.
+The generated request ID is restored in outgoing proxy requests after hop-by-hop headers have been removed.
+
+### Upstream error logging
+
+When a reverse-proxy operation fails, Gorpx records a structured error log containing:
+
+- The selected upstream host.
+- The request path.
+- The generated request ID.
+- The underlying error details.
+
+The selected upstream is tracked per request, so concurrent requests do not overwrite each other's error context.
+
+### Aborted responses
+
+A proxied response may begin successfully but fail while its body is being transferred.
+
+For example, an upstream might send HTTP 200 and then close its connection before completing the response.
+
+In this situation, Gorpx preserves the committed HTTP status and records the aborted outcome separately.
+
+An aborted response is not necessarily an HTTP 502 response, because response headers may already have been sent to the client.
+
+### Privacy considerations
 
 Gorpx does not intentionally log request bodies, authorisation headers or URL query parameters in its access logs.
 
@@ -198,19 +308,22 @@ Gorpx allows each reverse-proxy route to configure its own upstream response-hea
 ```yaml
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
+      - http://localhost:3001
     response_header_timeout: 30s
 
   - path: /reports/
-    upstream: http://localhost:4000
+    upstreams:
+      - http://localhost:4000
     response_header_timeout: 2m
 ```
 
 ### Configuration
 
-| Setting                   | Default | Description                                        |
-| ------------------------- | ------- | -------------------------------------------------- |
-| `response_header_timeout` | `15s`   | Maximum time to wait for upstream response headers |
+| Setting | Default | Description |
+|---|---|---|
+| `response_header_timeout` | `15s` | Maximum time to wait for upstream response headers |
 
 The setting is optional and applies only to reverse-proxy routes.
 
@@ -220,15 +333,19 @@ Timeout values must be greater than zero. Invalid, zero or negative values cause
 
 ### Behaviour
 
-If the upstream does not return response headers before the configured timeout expires, Gorpx returns HTTP 502 Bad Gateway.
+If the selected upstream does not return response headers before the configured timeout expires, Gorpx normally returns HTTP 502 Bad Gateway.
 
 The timeout does not limit the time required to stream the upstream response body.
+
+For routes with multiple upstreams, the same timeout applies to each selected upstream.
+
+A timeout does not automatically trigger a retry against another upstream.
 
 ### Static routes
 
 `response_header_timeout` is not supported for static-file routes.
 
-For example, the following configuration is invalid:
+The following configuration is invalid:
 
 ```yaml
 routes:
@@ -237,14 +354,16 @@ routes:
     response_header_timeout: 30s
 ```
 
-Existing configurations that omit the timeout continue to use the default of 15 seconds.
+Configurations that omit the timeout use the default of 15 seconds.
 
 ## Limitations
 
 - No automatic HTTPS or certificate management.
-- No load balancing or health checks.
+- No active upstream health checks.
+- No automatic upstream failover or request retries.
+- No weighted or least-connections load balancing.
 - No configuration hot reloading.
 - No URL prefix rewriting.
-- No authentication or access-control system.
+- No built-in authentication or access-control system.
 
 Gorpx is currently intended for development and controlled testing environments.

@@ -44,8 +44,8 @@ func TestIntegration(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: backend.URL,
+				Path:      "/api/",
+				Upstreams: []string{backend.URL},
 			},
 			{
 				Path: "/static/",
@@ -146,8 +146,8 @@ func TestIntegrationStreamedBodyLimit(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: upstream.URL,
+				Path:      "/api/",
+				Upstreams: []string{upstream.URL},
 			},
 		},
 	}
@@ -226,8 +226,8 @@ func TestIntegrationUpstreamUnavailable(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: upstreamURL,
+				Path:      "/api/",
+				Upstreams: []string{upstreamURL},
 			},
 		},
 	}
@@ -295,8 +295,8 @@ func TestIntegrationUpstreamTimeout(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: upstream.URL,
+				Path:      "/api/",
+				Upstreams: []string{upstream.URL},
 			},
 		},
 	}
@@ -487,8 +487,8 @@ func TestIntegrationRequestID(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: upstream.URL,
+				Path:      "/api/",
+				Upstreams: []string{upstream.URL},
 			},
 		},
 	}
@@ -563,8 +563,8 @@ func TestIntegrationUpstreamErrorRequestID(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: upstreamURL,
+				Path:      "/api/",
+				Upstreams: []string{upstreamURL},
 			},
 		},
 	}
@@ -616,7 +616,7 @@ func TestIntegrationUpstreamErrorRequestID(t *testing.T) {
 		}
 
 		switch entry.Message {
-		case "HTTP request":
+		case "http request":
 			if entry.Status != http.StatusBadGateway {
 				t.Errorf("logged status = %d, want 502", entry.Status)
 			}
@@ -666,12 +666,12 @@ func TestIntegrationRouteSpecificTimeouts(t *testing.T) {
 		Routes: []config.Route{
 			{
 				Path:                  "/fast/",
-				Upstream:              upstream.URL,
+				Upstreams:             []string{upstream.URL},
 				ResponseHeaderTimeout: "50ms",
 			},
 			{
 				Path:                  "/slow/",
-				Upstream:              upstream.URL,
+				Upstreams:             []string{upstream.URL},
 				ResponseHeaderTimeout: "1s",
 			},
 		},
@@ -718,5 +718,242 @@ func TestIntegrationRouteSpecificTimeouts(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestIntegrationRoundRobin(t *testing.T) {
+	backend := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(name))
+			},
+		))
+	}
+
+	first := backend("backend-a")
+	defer first.Close()
+
+	second := backend("backend-b")
+	defer second.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path: "/api/",
+				Upstreams: []string{
+					first.URL,
+					second.URL,
+				},
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	want := []string{
+		"backend-a",
+		"backend-b",
+		"backend-a",
+		"backend-b",
+		"backend-a",
+		"backend-b",
+	}
+
+	for i, expected := range want {
+		resp, err := gorpx.Client().Get(
+			gorpx.URL + "/api/test",
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf(
+				"request %d: status = %d, want 200",
+				i+1,
+				resp.StatusCode,
+			)
+		}
+
+		if string(body) != expected {
+			t.Errorf(
+				"request %d: got %q, want %q",
+				i+1,
+				body,
+				expected,
+			)
+		}
+	}
+}
+
+func TestIntegrationRoundRobinUpstreamFailure(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("healthy"))
+		},
+	))
+	defer healthy.Close()
+
+	unavailable := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {},
+	))
+
+	unavailableURL := unavailable.URL
+	unavailable.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path: "/api/",
+				Upstreams: []string{
+					healthy.URL,
+					unavailableURL,
+				},
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	want := []int{
+		http.StatusOK,
+		http.StatusBadGateway,
+		http.StatusOK,
+		http.StatusBadGateway,
+	}
+
+	for i, wantStatus := range want {
+		resp, err := gorpx.Client().Get(
+			gorpx.URL + "/api/test",
+		)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i+1, err)
+		}
+
+		_, readErr := io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if readErr != nil {
+			t.Fatalf(
+				"request %d: read response: %v",
+				i+1,
+				readErr,
+			)
+		}
+
+		if resp.StatusCode != wantStatus {
+			t.Errorf(
+				"request %d: status = %d, want %d",
+				i+1,
+				resp.StatusCode,
+				wantStatus,
+			)
+		}
+	}
+
+	resp, err := gorpx.Client().Get(gorpx.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf(
+			"health status = %d, want 200",
+			resp.StatusCode,
+		)
+	}
+}
+
+func TestIntegrationRequestIDConnectionHeader(t *testing.T) {
+	var upstreamRequestID string
+
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			upstreamRequestID = r.Header.Get("X-Request-ID")
+			w.WriteHeader(http.StatusOK)
+		},
+	))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:      "/api/",
+				Upstreams: []string{upstream.URL},
+			},
+		},
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		gorpx.URL+"/api/test",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Set("Connection", "X-Request-ID")
+	req.Header.Set("X-Request-ID", "client-provided-id")
+
+	resp, err := gorpx.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	responseID := resp.Header.Get("X-Request-ID")
+
+	if responseID == "" {
+		t.Fatal("response is missing X-Request-ID")
+	}
+
+	if responseID == "client-provided-id" {
+		t.Fatal("client-provided request ID was trusted")
+	}
+
+	if upstreamRequestID != responseID {
+		t.Errorf(
+			"upstream request ID = %q, response ID = %q",
+			upstreamRequestID,
+			responseID,
+		)
 	}
 }

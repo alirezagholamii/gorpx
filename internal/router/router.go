@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,9 +18,8 @@ func New(routes []config.Route) (http.Handler, error) {
 	seen := make(map[string]bool)
 
 	for _, route := range routes {
-		if !strings.HasPrefix(route.Path, "/") ||
-			!strings.HasSuffix(route.Path, "/") {
-			return nil, fmt.Errorf("invalid route path: %q", route.Path)
+		if err := config.ValidateRoutePath(route.Path); err != nil {
+			return nil, err
 		}
 
 		if seen[route.Path] {
@@ -27,33 +27,70 @@ func New(routes []config.Route) (http.Handler, error) {
 		}
 		seen[route.Path] = true
 
-		hasUpstream := route.Upstream != ""
+		hasUpstreams := len(route.Upstreams) > 0
 		hasRoot := route.Root != ""
 
-		if hasUpstream == hasRoot {
+		if hasUpstreams == hasRoot {
 			return nil, fmt.Errorf(
-				"route %q must define either upstream or root",
+				"route %q must define exactly one of upstreams or root",
 				route.Path,
 			)
 		}
 
 		if hasRoot {
+			if route.ResponseHeaderTimeout != "" {
+				return nil, fmt.Errorf(
+					"route %q: response_header_timeout is only valid for upstream routes",
+					route.Path,
+				)
+			}
+
 			mux.Handle(route.Path, static.New(route.Path, route.Root))
 			continue
 		}
 
-		target, err := url.Parse(route.Upstream)
-		if err != nil {
-			return nil, fmt.Errorf("parse upstream: %w", err)
-		}
+		targets := make([]*url.URL, 0, len(route.Upstreams))
 
-		if (target.Scheme != "http" && target.Scheme != "https") ||
-			target.Host == "" ||
-			target.User != nil ||
-			target.RawQuery != "" ||
-			target.Fragment != "" ||
-			(target.Path != "" && target.Path != "/") {
-			return nil, fmt.Errorf("invalid upstream: %q", route.Upstream)
+		for _, upstream := range route.Upstreams {
+			target, err := url.Parse(upstream)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"route %q: parse upstream %q: %w",
+					route.Path,
+					upstream,
+					err,
+				)
+			}
+
+			if (target.Scheme != "http" && target.Scheme != "https") ||
+				target.Hostname() == "" ||
+				target.User != nil ||
+				target.Opaque != "" ||
+				target.RawQuery != "" ||
+				target.ForceQuery ||
+				target.Fragment != "" ||
+				target.RawFragment != "" ||
+				(target.Path != "" && target.Path != "/") ||
+				strings.HasSuffix(target.Host, ":") {
+				return nil, fmt.Errorf(
+					"route %q: invalid upstream %q",
+					route.Path,
+					upstream,
+				)
+			}
+
+			if port := target.Port(); port != "" {
+				number, err := strconv.Atoi(port)
+				if err != nil || number < 1 || number > 65535 {
+					return nil, fmt.Errorf(
+						"route %q: invalid upstream port %q",
+						route.Path,
+						port,
+					)
+				}
+			}
+
+			targets = append(targets, target)
 		}
 
 		responseHeaderTimeout := 15 * time.Second
@@ -78,7 +115,7 @@ func New(routes []config.Route) (http.Handler, error) {
 			responseHeaderTimeout = parsed
 		}
 
-		mux.Handle(route.Path, proxy.New(target, responseHeaderTimeout))
+		mux.Handle(route.Path, proxy.New(targets, responseHeaderTimeout))
 	}
 
 	return mux, nil

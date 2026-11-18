@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
@@ -25,8 +26,8 @@ func TestRouting(t *testing.T) {
 	defer app.Close()
 
 	handler, err := New([]config.Route{
-		{Path: "/api/", Upstream: api.URL},
-		{Path: "/app/", Upstream: app.URL},
+		{Path: "/api/", Upstreams: []string{api.URL, app.URL}},
+		{Path: "/app/", Upstreams: []string{app.URL}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +56,32 @@ func TestRouting(t *testing.T) {
 
 			if got := rec.Body.String(); got != tt.wantBody {
 				t.Errorf("body = %q, want %q", got, tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestRejectEquivalentEscapedRoutes(t *testing.T) {
+	for _, paths := range [][]string{
+		{"/api/", "/%61pi/"},
+		{"/%61pi/", "/api/"},
+		{"/api/", "/%61%70%69/"},
+	} {
+		t.Run(strings.Join(paths, ","), func(t *testing.T) {
+			var routes []config.Route
+			for _, path := range paths {
+				routes = append(routes, config.Route{
+					Path:      path,
+					Upstreams: []string{"http://localhost:3000"},
+				})
+			}
+
+			handler, err := New(routes)
+			if err == nil || !strings.Contains(err.Error(), "must not contain percent escapes") {
+				t.Fatalf("New() error = %v, want percent-escape validation error", err)
+			}
+			if handler != nil {
+				t.Fatal("New() returned a handler for invalid routes")
 			}
 		})
 	}

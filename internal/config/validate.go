@@ -16,6 +16,11 @@ func Validate(cfg Config) error {
 		return fmt.Errorf("invalid server address: %w", err)
 	}
 
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("invalid server port: %q", port)
+	}
+
 	timeouts := []struct {
 		name  string
 		value string
@@ -61,11 +66,6 @@ func Validate(cfg Config) error {
 		)
 	}
 
-	number, err := strconv.Atoi(port)
-	if err != nil || number < 1 || number > 65535 {
-		return fmt.Errorf("invalid server port: %q", port)
-	}
-
 	if len(cfg.Routes) == 0 {
 		return fmt.Errorf("at least one route is required")
 	}
@@ -73,6 +73,10 @@ func Validate(cfg Config) error {
 	seen := make(map[string]bool)
 
 	for _, route := range cfg.Routes {
+		if err := ValidateRoutePath(route.Path); err != nil {
+			return err
+		}
+
 		if !strings.HasPrefix(route.Path, "/") ||
 			!strings.HasSuffix(route.Path, "/") {
 			return fmt.Errorf("invalid route path: %q", route.Path)
@@ -83,11 +87,19 @@ func Validate(cfg Config) error {
 		}
 		seen[route.Path] = true
 
-		hasUpstream := route.Upstream != ""
-		hasRoot := route.Root != ""
-		if hasUpstream == hasRoot {
+		if route.Upstreams != nil && len(route.Upstreams) == 0 {
 			return fmt.Errorf(
-				"route %q must define exactly one of upstream or root",
+				"route %q: upstreams must not be empty",
+				route.Path,
+			)
+		}
+
+		hasUpstreams := len(route.Upstreams) > 0
+		hasRoot := route.Root != ""
+
+		if hasUpstreams == hasRoot {
+			return fmt.Errorf(
+				"route %q must define exactly one of upstreams or root",
 				route.Path,
 			)
 		}
@@ -138,50 +150,46 @@ func Validate(cfg Config) error {
 			}
 		}
 
-		if hasUpstream {
-			target, err := url.Parse(route.Upstream)
-
-			if err != nil {
+		for _, upstream := range route.Upstreams {
+			if err := validateUpstreamURL(upstream); err != nil {
 				return fmt.Errorf(
-					"route %q: invalid upstream %q: %w",
+					"route %q: %w",
 					route.Path,
-					route.Upstream,
 					err,
 				)
 			}
+		}
+	}
 
-			if strings.HasSuffix(target.Host, ":") {
-				return fmt.Errorf(
-					"route %q: empty upstream port",
-					route.Path,
-				)
-			}
+	return nil
+}
 
-			if port := target.Port(); port != "" {
-				number, err := strconv.Atoi(port)
-				if err != nil || number < 1 || number > 65535 {
-					return fmt.Errorf(
-						"route %q: invalid upstream port %q",
-						route.Path,
-						port,
-					)
-				}
-			}
+func validateUpstreamURL(rawURL string) error {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid upstream %q: %w", rawURL, err)
+	}
 
-			if (target.Scheme != "http" && target.Scheme != "https") ||
-				target.Hostname() == "" ||
-				target.User != nil ||
-				target.RawQuery != "" ||
-				target.ForceQuery ||
-				target.Fragment != "" ||
-				target.RawFragment != "" ||
-				(target.Path != "" && target.Path != "/") {
-				return fmt.Errorf(
-					"route %q: invalid upstream %q",
-					route.Path,
-					route.Upstream,
-				)
-			}
+	if (target.Scheme != "http" && target.Scheme != "https") ||
+		target.Hostname() == "" ||
+		target.User != nil ||
+		target.Opaque != "" ||
+		target.RawQuery != "" ||
+		target.ForceQuery ||
+		target.Fragment != "" ||
+		target.RawFragment != "" ||
+		(target.Path != "" && target.Path != "/") {
+		return fmt.Errorf("invalid upstream %q", rawURL)
+	}
+
+	if strings.HasSuffix(target.Host, ":") {
+		return fmt.Errorf("invalid upstream %q: empty port", rawURL)
+	}
+
+	if port := target.Port(); port != "" {
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 1 || number > 65535 {
+			return fmt.Errorf("invalid upstream %q: invalid port %q", rawURL, port)
 		}
 	}
 

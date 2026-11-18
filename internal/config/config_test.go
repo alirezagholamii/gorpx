@@ -43,3 +43,20 @@ func TestDefault(t *testing.T) {
 		)
 	}
 }
+
+func TestRouteMultipleUpstreams(t *testing.T) {
+	route := Route{
+		Path: "/api/",
+		Upstreams: []string{
+			"http://localhost:9001",
+			"http://localhost:9002",
+		},
+	}
+
+	if len(route.Upstreams) != 2 {
+		t.Errorf(
+			"upstreams = %d, want 2",
+			len(route.Upstreams),
+		)
+	}
+}

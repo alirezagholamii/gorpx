@@ -41,8 +41,8 @@ func TestHandler(t *testing.T) {
 
 	cfg.Routes = []config.Route{
 		{
-			Path:     "/api/",
-			Upstream: "http://localhost:3000",
+			Path:      "/api/",
+			Upstreams: []string{"http://localhost:3000"},
 		},
 	}
 
@@ -78,8 +78,8 @@ func TestMaxHeaderBytes(t *testing.T) {
 		},
 		Routes: []config.Route{
 			{
-				Path:     "/api/",
-				Upstream: "http://localhost:3000",
+				Path:      "/api/",
+				Upstreams: []string{"http://localhost:3000"},
 			},
 		},
 	}
@@ -157,8 +157,8 @@ func TestServerTimeouts(t *testing.T) {
 				},
 				Routes: []config.Route{
 					{
-						Path:     "/api/",
-						Upstream: "http://localhost:3000",
+						Path:      "/api/",
+						Upstreams: []string{"http://localhost:3000"},
 					},
 				},
 			}
@@ -213,8 +213,8 @@ func TestServerMaxHeaderBytes(t *testing.T) {
 				},
 				Routes: []config.Route{
 					{
-						Path:     "/api/",
-						Upstream: "http://localhost:3000",
+						Path:      "/api/",
+						Upstreams: []string{"http://localhost:3000"},
 					},
 				},
 			}

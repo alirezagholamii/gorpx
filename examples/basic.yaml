@@ -7,11 +7,13 @@ server:
 
 routes:
   - path: /api/
-    upstream: http://localhost:3000
+    upstreams:
+      - http://localhost:3000
     response_header_timeout: 30s
 
   - path: /app/
-    upstream: http://localhost:4200
+    upstreams:
+      - http://localhost:4200
 
   - path: /static/
     root: ./public

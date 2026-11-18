@@ -17,6 +17,26 @@ func TestValidate(t *testing.T) {
 			name: "valid configuration",
 		},
 		{
+			name: "multiple upstreams",
+			modify: func(cfg *Config) {
+				cfg.Routes[0].Upstreams = append(cfg.Routes[0].Upstreams, "https://localhost:3001")
+			},
+		},
+		{
+			name: "invalid second upstream",
+			modify: func(cfg *Config) {
+				cfg.Routes[0].Upstreams = append(cfg.Routes[0].Upstreams, "ftp://localhost:3001")
+			},
+			wantErr: "invalid upstream",
+		},
+		{
+			name: "empty upstreams",
+			modify: func(cfg *Config) {
+				cfg.Routes[0].Upstreams = []string{}
+			},
+			wantErr: "upstreams must not be empty",
+		},
+		{
 			name: "invalid server port",
 			modify: func(cfg *Config) {
 				cfg.Server.Address = ":99999"
@@ -38,16 +58,26 @@ func TestValidate(t *testing.T) {
 			wantErr: "duplicate route",
 		},
 		{
+			name: "equivalent escaped route",
+			modify: func(cfg *Config) {
+				cfg.Routes = append(cfg.Routes, Route{
+					Path:      "/%61pi/",
+					Upstreams: []string{"http://localhost:3001"},
+				})
+			},
+			wantErr: "must not contain percent escapes",
+		},
+		{
 			name: "invalid upstream scheme",
 			modify: func(cfg *Config) {
-				cfg.Routes[0].Upstream = "ftp://localhost:3000"
+				cfg.Routes[0].Upstreams = []string{"ftp://localhost:3000"}
 			},
 			wantErr: "invalid upstream",
 		},
 		{
 			name: "missing destination",
 			modify: func(cfg *Config) {
-				cfg.Routes[0].Upstream = ""
+				cfg.Routes[0].Upstreams = nil
 			},
 			wantErr: "exactly one",
 		},
@@ -68,14 +98,14 @@ func TestValidate(t *testing.T) {
 		{
 			name: "missing upstream scheme",
 			modify: func(cfg *Config) {
-				cfg.Routes[0].Upstream = "localhost:3000"
+				cfg.Routes[0].Upstreams = []string{"localhost:3000"}
 			},
 			wantErr: "invalid upstream",
 		},
 		{
 			name: "empty upstream hostname",
 			modify: func(cfg *Config) {
-				cfg.Routes[0].Upstream = "http://"
+				cfg.Routes[0].Upstreams = []string{"http://"}
 			},
 			wantErr: "invalid upstream",
 		},
@@ -94,8 +124,8 @@ func TestValidate(t *testing.T) {
 				Server: Server{Address: ":8080"},
 				Routes: []Route{
 					{
-						Path:     "/api/",
-						Upstream: "http://localhost:3000",
+						Path:      "/api/",
+						Upstreams: []string{"http://localhost:3000"},
 					},
 				},
 			}
@@ -200,8 +230,8 @@ func TestValidateUpstream(t *testing.T) {
 				Server: Server{Address: ":8080"},
 				Routes: []Route{
 					{
-						Path:     "/api/",
-						Upstream: tt.url,
+						Path:      "/api/",
+						Upstreams: []string{tt.url},
 					},
 				},
 			}
@@ -245,8 +275,8 @@ func TestValidateServerTimeouts(t *testing.T) {
 				},
 				Routes: []Route{
 					{
-						Path:     "/api/",
-						Upstream: "http://localhost:3000",
+						Path:      "/api/",
+						Upstreams: []string{"http://localhost:3000"},
 					},
 				},
 			}
@@ -314,8 +344,8 @@ func TestValidateRequestLimits(t *testing.T) {
 				},
 				Routes: []Route{
 					{
-						Path:     "/api/",
-						Upstream: "http://localhost:3000",
+						Path:      "/api/",
+						Upstreams: []string{"http://localhost:3000"},
 					},
 				},
 			}
@@ -360,7 +390,7 @@ func TestValidateResponseHeaderTimeout(t *testing.T) {
 				Routes: []Route{
 					{
 						Path:                  "/api/",
-						Upstream:              "http://localhost:3000",
+						Upstreams:             []string{"http://localhost:3000"},
 						ResponseHeaderTimeout: tt.timeout,
 					},
 				},
