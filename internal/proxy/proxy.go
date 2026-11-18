@@ -26,6 +26,12 @@ func New(targets []*url.URL, responseHeaderTimeout time.Duration) http.Handler {
 
 			pr.SetURL(target)
 			pr.SetXForwarded()
+			
+			// Restore the trusted request ID after hop-by-hop
+			// headers have been removed.
+			if requestID := pr.In.Header.Get("X-Request-ID"); requestID != "" {
+				pr.Out.Header.Set("X-Request-ID", requestID)
+			}
 		},
 
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
