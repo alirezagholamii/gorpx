@@ -616,7 +616,7 @@ func TestIntegrationUpstreamErrorRequestID(t *testing.T) {
 		}
 
 		switch entry.Message {
-		case "HTTP request":
+		case "http request":
 			if entry.Status != http.StatusBadGateway {
 				t.Errorf("logged status = %d, want 502", entry.Status)
 			}
