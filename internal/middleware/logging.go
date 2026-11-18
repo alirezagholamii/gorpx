@@ -44,26 +44,39 @@ func (w *responseWriter) Unwrap() http.ResponseWriter {
 func Logging(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
 		recorder := &responseWriter{
 			ResponseWriter: w,
 		}
 
+		var aborted bool
+
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				aborted = true
+
+				defer func() {
+					panic(recovered)
+				}()
+			}
+
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+
+			logger.Info(
+				"http request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", status,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"client_ip", clientIP(r.RemoteAddr),
+				"request_id", r.Header.Get("X-Request-ID"),
+				"aborted", aborted,
+			)
+		}()
+
 		next.ServeHTTP(recorder, r)
-
-		status := recorder.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-
-		logger.InfoContext(r.Context(), "HTTP request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", recorder.status,
-			"duration_ms", time.Since(start).Milliseconds(),
-			"client_ip", clientIP(r.RemoteAddr),
-			"request_id", r.Header.Get("X-Request-ID"),
-		)
 	})
 }
 

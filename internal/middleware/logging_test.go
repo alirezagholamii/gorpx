@@ -260,3 +260,74 @@ func TestLoggingRequestID(t *testing.T) {
 		t.Errorf("logged path = %q, want /api/test", entry.Path)
 	}
 }
+
+func TestLoggingAbortedResponse(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	handler := Logging(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			panic(http.ErrAbortHandler)
+		}),
+		logger,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	recorder := httptest.NewRecorder()
+
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != http.ErrAbortHandler {
+				t.Errorf(
+					"panic = %v, want http.ErrAbortHandler",
+					recovered,
+				)
+			}
+		}()
+
+		handler.ServeHTTP(recorder, req)
+	}()
+
+	var entry struct {
+		Status  int  `json:"status"`
+		Aborted bool `json:"aborted"`
+	}
+
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if entry.Status != http.StatusOK {
+		t.Errorf("status = %d, want 200", entry.Status)
+	}
+
+	if !entry.Aborted {
+		t.Error("expected aborted = true")
+	}
+}
+
+func TestLoggingDefaultStatus(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	handler := Logging(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		logger,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	var entry struct {
+		Status int `json:"status"`
+	}
+
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if entry.Status != http.StatusOK {
+		t.Errorf("status = %d, want 200", entry.Status)
+	}
+}
