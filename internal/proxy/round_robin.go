@@ -8,18 +8,18 @@ import (
 type roundRobin struct {
 	mu      sync.Mutex
 	targets []*url.URL
-	health  []*upstreamHealth
+	healthy []bool
 	next    int
 }
 
 func newRoundRobin(targets []*url.URL) *roundRobin {
 	rr := &roundRobin{
 		targets: targets,
-		health:  make([]*upstreamHealth, len(targets)),
+		healthy: make([]bool, len(targets)),
 	}
 
 	for i := range targets {
-		rr.health[i] = newUpstreamHealth()
+		rr.healthy[i] = true
 	}
 
 	return rr
@@ -38,7 +38,7 @@ func (rr *roundRobin) Next() (*url.URL, bool) {
 	for i := 0; i < count; i++ {
 		index := (rr.next + i) % count
 
-		if rr.health[index].IsHealthy() {
+		if rr.healthy[index] {
 			rr.next = (index + 1) % count
 			return rr.targets[index], true
 		}
@@ -47,6 +47,12 @@ func (rr *roundRobin) Next() (*url.URL, bool) {
 	return nil, false
 }
 
-func (rr *roundRobin) SetHealthy(index int, healthy bool) {
-	rr.health[index].SetHealthy(healthy)
+// SetHealthy reports whether the upstream's health changed.
+func (rr *roundRobin) SetHealthy(index int, healthy bool) bool {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	changed := rr.healthy[index] != healthy
+	rr.healthy[index] = healthy
+	return changed
 }

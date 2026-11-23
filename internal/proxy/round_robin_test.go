@@ -160,19 +160,83 @@ func TestRoundRobinRecovery(t *testing.T) {
 
 	rr.SetHealthy(1, true)
 
-	seen := make(map[string]bool)
-
-	for i := 0; i < 2; i++ {
+	for _, want := range []*url.URL{targets[1], targets[0]} {
 		target, ok := rr.Next()
-		if !ok {
-			t.Fatal("expected a healthy upstream")
+		if !ok || target != want {
+			t.Fatalf("Next() = (%v, %v) after recovery, want (%v, true)", target, ok, want)
 		}
+	}
+}
 
-		seen[target.Host] = true
+func TestRoundRobinConcurrentHealthHandoff(t *testing.T) {
+	// Leave unhealthy targets between the two peers in both directions.
+	const peer = 64
+	targets := make([]*url.URL, 2*peer)
+	for i := range targets {
+		targets[i] = &url.URL{}
+	}
+	rr := newRoundRobin(targets)
+	for i := range targets {
+		rr.SetHealthy(i, i == peer)
 	}
 
-	if !seen["backend-a"] || !seen["backend-b"] {
-		t.Errorf("recovered backend was not selected: %v", seen)
+	const iterations = 5000
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		<-start
+		for range iterations {
+			// Always restore the incoming peer before disabling the outgoing one.
+			rr.SetHealthy(0, true)
+			rr.SetHealthy(peer, false)
+			rr.SetHealthy(peer, true)
+			rr.SetHealthy(0, false)
+		}
+	})
+
+	for range 4 {
+		wg.Go(func() {
+			<-start
+			for range iterations {
+				target, ok := rr.Next()
+				if !ok || (target != targets[0] && target != targets[peer]) {
+					t.Error("Next() did not select either peer during a health handoff")
+					return
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+}
+
+func TestRoundRobinSingleUpstream(t *testing.T) {
+	upstream := &url.URL{Host: "backend"}
+	rr := newRoundRobin([]*url.URL{upstream})
+
+	for _, step := range []struct {
+		healthy bool
+		changed bool
+	}{
+		{healthy: true, changed: false},
+		{healthy: false, changed: true},
+		{healthy: false, changed: false},
+		{healthy: true, changed: true},
+		{healthy: true, changed: false},
+	} {
+		if changed := rr.SetHealthy(0, step.healthy); changed != step.changed {
+			t.Errorf("SetHealthy(0, %v) = %v, want %v", step.healthy, changed, step.changed)
+		}
+
+		var want *url.URL
+		if step.healthy {
+			want = upstream
+		}
+		if target, ok := rr.Next(); target != want || ok != step.healthy {
+			t.Errorf("Next() = (%v, %v), want (%v, %v)", target, ok, want, step.healthy)
+		}
 	}
 }
 

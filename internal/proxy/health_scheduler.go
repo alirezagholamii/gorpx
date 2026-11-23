@@ -78,11 +78,7 @@ func (s *healthScheduler) monitor(
 		}
 
 		healthy := err == nil
-		previous := s.selector.health[index].IsHealthy()
-
-		s.selector.SetHealthy(index, healthy)
-
-		if healthy != previous {
+		if s.selector.SetHealthy(index, healthy) {
 			slog.Info(
 				"upstream health changed",
 				"upstream", upstream.Host,

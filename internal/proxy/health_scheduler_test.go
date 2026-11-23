@@ -60,18 +60,17 @@ func TestHealthScheduler(t *testing.T) {
 	// Simulate a failing upstream.
 	healthy.Store(false)
 
-	waitForHealth(t, selector, 0, false)
+	waitForHealth(t, selector, false)
 
 	// Simulate recovery.
 	healthy.Store(true)
 
-	waitForHealth(t, selector, 0, true)
+	waitForHealth(t, selector, true)
 }
 
 func waitForHealth(
 	t *testing.T,
 	selector *roundRobin,
-	index int,
 	want bool,
 ) {
 	t.Helper()
@@ -82,7 +81,7 @@ func waitForHealth(
 	defer ticker.Stop()
 
 	for {
-		if selector.health[index].IsHealthy() == want {
+		if _, selectable := selector.Next(); selectable == want {
 			return
 		}
 
