@@ -234,3 +234,42 @@ func TestServerMaxHeaderBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestNewWithHealthRunners(t *testing.T) {
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path: "/api/",
+				Upstreams: []string{
+					"http://localhost:9001",
+				},
+				HealthCheck: &config.HealthCheck{},
+			},
+			{
+				Path: "/other/",
+				Upstreams: []string{
+					"http://localhost:9002",
+				},
+			},
+		},
+	}
+
+	srv, runners, err := NewWithHealth(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if srv == nil {
+		t.Fatal("expected an HTTP server")
+	}
+
+	if len(runners) != 1 {
+		t.Errorf(
+			"health runners = %d, want 1",
+			len(runners),
+		)
+	}
+}

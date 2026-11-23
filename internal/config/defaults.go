@@ -21,5 +21,26 @@ func ApplyDefaults(cfg Config) Config {
 		cfg.Server.MaxBodyBytes = defaults.Server.MaxBodyBytes
 	}
 
+	for i := range cfg.Routes {
+		hc := cfg.Routes[i].HealthCheck
+		if hc == nil {
+			continue
+		}
+
+		updated := *hc
+
+		if updated.Path == "" {
+			updated.Path = "/health"
+		}
+		if updated.Interval == "" {
+			updated.Interval = "10s"
+		}
+		if updated.Timeout == "" {
+			updated.Timeout = "2s"
+		}
+
+		cfg.Routes[i].HealthCheck = &updated
+	}
+
 	return cfg
 }

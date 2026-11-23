@@ -2,21 +2,51 @@ package proxy
 
 import (
 	"net/url"
-	"sync/atomic"
+	"sync"
 )
 
 type roundRobin struct {
+	mu      sync.Mutex
 	targets []*url.URL
-	next    atomic.Uint64
+	health  []*upstreamHealth
+	next    int
 }
 
 func newRoundRobin(targets []*url.URL) *roundRobin {
-	return &roundRobin{
+	rr := &roundRobin{
 		targets: targets,
+		health:  make([]*upstreamHealth, len(targets)),
 	}
+
+	for i := range targets {
+		rr.health[i] = newUpstreamHealth()
+	}
+
+	return rr
 }
 
-func (rr *roundRobin) Next() *url.URL {
-	index := (rr.next.Add(1) - 1) % uint64(len(rr.targets))
-	return rr.targets[index]
+func (rr *roundRobin) Next() (*url.URL, bool) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	count := len(rr.targets)
+
+	if count == 0 {
+		return nil, false
+	}
+
+	for i := 0; i < count; i++ {
+		index := (rr.next + i) % count
+
+		if rr.health[index].IsHealthy() {
+			rr.next = (index + 1) % count
+			return rr.targets[index], true
+		}
+	}
+
+	return nil, false
+}
+
+func (rr *roundRobin) SetHealthy(index int, healthy bool) {
+	rr.health[index].SetHealthy(healthy)
 }

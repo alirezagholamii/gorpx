@@ -434,3 +434,56 @@ func TestValidateStaticRouteTimeout(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateHealthCheckPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"valid health", "/health", false},
+		{"valid ready", "/ready", false},
+		{"valid nested path", "/internal/health", false},
+		{"relative path", "health", true},
+		{"double slash prefix", "//example.com/health", true},
+		{"query string", "/health?token=123", true},
+		{"fragment", "/health#fragment", true},
+		{"wildcard", "/health/{id}", true},
+		{"encoded slash", "/health%2Fadmin", true},
+		{"parent directory", "/../health", true},
+		{"current directory", "/./health", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Server: Server{
+					Address: ":8080",
+				},
+				Routes: []Route{
+					{
+						Path: "/api/",
+						Upstreams: []string{
+							"http://localhost:9001",
+						},
+						HealthCheck: &HealthCheck{
+							Path:     tt.path,
+							Interval: "10s",
+							Timeout:  "2s",
+						},
+					},
+				},
+			}
+
+			err := Validate(ApplyDefaults(cfg))
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf(
+					"Validate() error = %v, wantErr %v",
+					err,
+					tt.wantErr,
+				)
+			}
+		})
+	}
+}

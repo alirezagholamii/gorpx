@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,17 +29,35 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srv, err := server.New(cfg)
+	srv, runners, err := server.NewWithHealth(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ctx, stop := signal.NotifyContext(
+	signalCtx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
 		syscall.SIGTERM,
 	)
 	defer stop()
+
+	healthCtx, cancelHealth := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+
+	for _, runner := range runners {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			runner.Run(healthCtx)
+		}()
+	}
+
+	defer func() {
+		cancelHealth()
+		wg.Wait()
+	}()
 
 	serverErr := make(chan error, 1)
 
@@ -50,11 +69,13 @@ func main() {
 
 	select {
 	case err := <-serverErr:
-		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("HTTP server failed: %v", err)
+			return
 		}
 		return
-	case <-ctx.Done():
+
+	case <-signalCtx.Done():
 		log.Println("Shutting down Gorpx...")
 	}
 
@@ -68,7 +89,7 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Graceful shutdown failed: %v", err)
-		os.Exit(1)
+		return
 	}
 
 	log.Println("Gorpx stopped")

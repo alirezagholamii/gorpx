@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -956,4 +958,337 @@ func TestIntegrationRequestIDConnectionHeader(t *testing.T) {
 			responseID,
 		)
 	}
+}
+
+func TestIntegrationHealthCheckRecovery(t *testing.T) {
+	var healthy atomic.Bool
+	healthy.Store(true)
+
+	backend := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				if !healthy.Load() {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			_, _ = w.Write([]byte("backend response"))
+		},
+	))
+	defer backend.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:      "/api/",
+				Upstreams: []string{backend.URL},
+				HealthCheck: &config.HealthCheck{
+					Path:     "/health",
+					Interval: "30ms",
+					Timeout:  "20ms",
+				},
+			},
+		},
+	}
+
+	srv, runners, err := NewWithHealth(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runners) != 1 {
+		t.Fatalf("runners = %d, want 1", len(runners))
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		runners[0].Run(ctx)
+	}()
+
+	defer cancel()
+
+	client := gorpx.Client()
+	endpoint := gorpx.URL + "/api/test"
+
+	// Initially the backend is available.
+	waitForStatus(t, client, endpoint, http.StatusOK)
+
+	// The health endpoint starts failing.
+	healthy.Store(false)
+
+	// Gorpx must exclude the unhealthy backend.
+	waitForStatus(
+		t,
+		client,
+		endpoint,
+		http.StatusServiceUnavailable,
+	)
+
+	// The backend becomes healthy again.
+	healthy.Store(true)
+
+	// Gorpx must automatically resume forwarding requests.
+	waitForStatus(t, client, endpoint, http.StatusOK)
+
+	// Stop the health-check scheduler.
+	cancel()
+
+	select {
+	case <-done:
+		// Scheduler stopped successfully.
+	case <-time.After(time.Second):
+		t.Fatal("health scheduler did not stop")
+	}
+}
+
+func waitForStatus(
+	t *testing.T,
+	client *http.Client,
+	endpoint string,
+	want int,
+) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(endpoint)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+
+			if resp.StatusCode == want {
+				return
+			}
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf(
+		"endpoint %q did not return HTTP %d",
+		endpoint,
+		want,
+	)
+}
+
+func TestIntegrationHealthAwareRoundRobin(t *testing.T) {
+	var healthyA, healthyB atomic.Bool
+	healthyA.Store(true)
+	healthyB.Store(true)
+
+	newBackend := func(name string, healthy *atomic.Bool) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					if !healthy.Load() {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+
+				_, _ = w.Write([]byte(name))
+			},
+		))
+	}
+
+	backendA := newBackend("backend-a", &healthyA)
+	defer backendA.Close()
+
+	backendB := newBackend("backend-b", &healthyB)
+	defer backendB.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:      "/api/",
+				Upstreams: []string{backendA.URL, backendB.URL},
+				HealthCheck: &config.HealthCheck{
+					Path:     "/health",
+					Interval: "30ms",
+					Timeout:  "20ms",
+				},
+			},
+		},
+	}
+
+	srv, runners, err := NewWithHealth(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runners) != 1 {
+		t.Fatalf("health runners = %d, want 1", len(runners))
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		runners[0].Run(ctx)
+	}()
+
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	client := gorpx.Client()
+	endpoint := gorpx.URL + "/api/test"
+
+	// Both backends initially healthy.
+	assertBackendDistribution(t, client, endpoint, "backend-a", "backend-b")
+
+	// Backend B becomes unhealthy.
+	healthyB.Store(false)
+	waitForBackendOnly(t, client, endpoint, "backend-a")
+
+	// Backend A also becomes unhealthy.
+	healthyA.Store(false)
+	waitForStatus(
+		t,
+		client,
+		endpoint,
+		http.StatusServiceUnavailable,
+	)
+
+	// Backend B recovers.
+	healthyB.Store(true)
+	waitForBackendOnly(t, client, endpoint, "backend-b")
+
+	// Backend A recovers.
+	healthyA.Store(true)
+	waitForBothBackends(t, client, endpoint)
+}
+
+func backendResponse(
+	client *http.Client,
+	endpoint string,
+) (int, string, error) {
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", err
+	}
+
+	return resp.StatusCode, string(body), nil
+}
+
+func assertBackendDistribution(
+	t *testing.T,
+	client *http.Client,
+	endpoint string,
+	first string,
+	second string,
+) {
+	t.Helper()
+
+	want := []string{first, second, first, second}
+
+	for i, expected := range want {
+		status, body, err := backendResponse(client, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if status != http.StatusOK || body != expected {
+			t.Fatalf(
+				"request %d: got status=%d body=%q, want 200 %q",
+				i+1,
+				status,
+				body,
+				expected,
+			)
+		}
+	}
+}
+
+func waitForBackendOnly(
+	t *testing.T,
+	client *http.Client,
+	endpoint string,
+	want string,
+) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		allMatch := true
+
+		for i := 0; i < 4; i++ {
+			status, body, err := backendResponse(client, endpoint)
+
+			if err != nil ||
+				status != http.StatusOK ||
+				body != want {
+				allMatch = false
+				break
+			}
+		}
+
+		if allMatch {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("Gorpx did not route exclusively to %q", want)
+}
+
+func waitForBothBackends(
+	t *testing.T,
+	client *http.Client,
+	endpoint string,
+) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		seen := map[string]bool{}
+
+		for i := 0; i < 4; i++ {
+			status, body, err := backendResponse(client, endpoint)
+			if err == nil && status == http.StatusOK {
+				seen[body] = true
+			}
+		}
+
+		if seen["backend-a"] && seen["backend-b"] {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("both backends were not available after recovery")
 }
