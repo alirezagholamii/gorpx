@@ -1,5 +1,7 @@
 package config
 
+import "slices"
+
 func ApplyDefaults(cfg Config) Config {
 	defaults := Default()
 
@@ -21,6 +23,7 @@ func ApplyDefaults(cfg Config) Config {
 		cfg.Server.MaxBodyBytes = defaults.Server.MaxBodyBytes
 	}
 
+	cfg.Routes = slices.Clone(cfg.Routes)
 	for i := range cfg.Routes {
 		hc := cfg.Routes[i].HealthCheck
 		if hc == nil {
