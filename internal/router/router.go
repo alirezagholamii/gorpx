@@ -142,6 +142,12 @@ func NewWithHealth(
 }
 
 func New(routes []config.Route) (http.Handler, error) {
+	for _, route := range routes {
+		if route.HealthCheck != nil {
+			return nil, fmt.Errorf("route %q: health_check requires router.NewWithHealth()", route.Path)
+		}
+	}
+
 	handler, _, err := NewWithHealth(routes)
 	return handler, err
 }

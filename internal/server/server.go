@@ -67,6 +67,12 @@ func NewWithHealth(
 }
 
 func New(cfg config.Config) (*http.Server, error) {
+	for _, route := range cfg.Routes {
+		if route.HealthCheck != nil {
+			return nil, fmt.Errorf("route %q: health_check requires server.NewWithHealth()", route.Path)
+		}
+	}
+
 	srv, _, err := NewWithHealth(cfg)
 	return srv, err
 }

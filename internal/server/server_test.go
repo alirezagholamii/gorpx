@@ -235,7 +235,7 @@ func TestServerMaxHeaderBytes(t *testing.T) {
 	}
 }
 
-func TestNewWithHealthRunners(t *testing.T) {
+func TestConstructorsWithHealth(t *testing.T) {
 	cfg := config.Config{
 		Server: config.Server{
 			Address: "127.0.0.1:8080",
@@ -246,7 +246,6 @@ func TestNewWithHealthRunners(t *testing.T) {
 				Upstreams: []string{
 					"http://localhost:9001",
 				},
-				HealthCheck: &config.HealthCheck{},
 			},
 			{
 				Path: "/other/",
@@ -255,6 +254,16 @@ func TestNewWithHealthRunners(t *testing.T) {
 				},
 			},
 		},
+	}
+
+	if srv, err := New(cfg); err != nil || srv == nil {
+		t.Fatalf("New() without health checks = %v, %v, want a server", srv, err)
+	}
+
+	cfg.Routes[1].HealthCheck = &config.HealthCheck{}
+	if srv, err := New(cfg); srv != nil || err == nil ||
+		!strings.Contains(err.Error(), `route "/other/": health_check requires server.NewWithHealth()`) {
+		t.Fatalf("New() with health checks = %v, %v, want an error directing callers to server.NewWithHealth()", srv, err)
 	}
 
 	srv, runners, err := NewWithHealth(cfg)
@@ -266,10 +275,7 @@ func TestNewWithHealthRunners(t *testing.T) {
 		t.Fatal("expected an HTTP server")
 	}
 
-	if len(runners) != 1 {
-		t.Errorf(
-			"health runners = %d, want 1",
-			len(runners),
-		)
+	if len(runners) != 1 || runners[0] == nil {
+		t.Errorf("NewWithHealth() runners = %v, want one non-nil runner", runners)
 	}
 }

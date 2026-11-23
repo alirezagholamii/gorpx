@@ -86,3 +86,32 @@ func TestRejectEquivalentEscapedRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestConstructorsWithHealth(t *testing.T) {
+	routes := []config.Route{
+		{Path: "/api/", Upstreams: []string{"http://localhost:3000"}},
+		{Path: "/other/", Upstreams: []string{"http://localhost:3001"}},
+	}
+
+	if handler, err := New(routes); err != nil || handler == nil {
+		t.Fatalf("New() without health checks = %v, %v, want a handler", handler, err)
+	}
+
+	routes[1].HealthCheck = &config.HealthCheck{
+		Path:     "/health",
+		Interval: "10s",
+		Timeout:  "2s",
+	}
+	if handler, err := New(routes); handler != nil || err == nil ||
+		!strings.Contains(err.Error(), `route "/other/": health_check requires router.NewWithHealth()`) {
+		t.Fatalf("New() with health checks = %v, %v, want an error directing callers to router.NewWithHealth()", handler, err)
+	}
+
+	handler, runners, err := NewWithHealth(routes)
+	if err != nil || handler == nil {
+		t.Fatalf("NewWithHealth() = %v, %v, want a handler", handler, err)
+	}
+	if len(runners) != 1 || runners[0] == nil {
+		t.Errorf("NewWithHealth() runners = %v, want one non-nil runner", runners)
+	}
+}
