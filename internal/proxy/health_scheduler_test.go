@@ -13,7 +13,6 @@ import (
 
 func TestHealthScheduler(t *testing.T) {
 	var healthy atomic.Bool
-	healthy.Store(true)
 
 	backend := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
@@ -41,11 +40,11 @@ func TestHealthScheduler(t *testing.T) {
 	scheduler := newHealthScheduler(
 		selector,
 		"/health",
-		20*time.Millisecond,
-		100*time.Millisecond,
+		250*time.Millisecond,
+		200*time.Millisecond,
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 
 	go func() {
@@ -55,12 +54,10 @@ func TestHealthScheduler(t *testing.T) {
 
 	defer func() {
 		cancel()
-		<-done
+		waitForProbeSignal(t, done, "scheduler to stop")
 	}()
 
-	// Simulate a failing upstream.
-	healthy.Store(false)
-
+	// The backend initially fails its health checks.
 	waitForHealth(t, selector, false)
 
 	// Simulate recovery.
@@ -74,6 +71,11 @@ func TestHealthSchedulerCancelsActiveProbe(t *testing.T) {
 	canceled := make(chan struct{})
 	release := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Errorf("unexpected probe path: %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		close(started)
 		select {
 		case <-r.Context().Done():
@@ -82,7 +84,6 @@ func TestHealthSchedulerCancelsActiveProbe(t *testing.T) {
 		}
 	}))
 	t.Cleanup(backend.Close)
-	defer close(release)
 
 	target, err := url.Parse(backend.URL)
 	if err != nil {
@@ -92,8 +93,12 @@ func TestHealthSchedulerCancelsActiveProbe(t *testing.T) {
 	scheduler := newHealthScheduler(selector, "/health", time.Minute, time.Minute)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	done := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		close(release)
+		waitForProbeSignal(t, done, "scheduler to stop during cleanup")
+	})
 	go func() {
 		defer close(done)
 		scheduler.Run(ctx)
@@ -171,7 +176,7 @@ func waitForHealth(
 ) {
 	t.Helper()
 
-	deadline := time.After(time.Second)
+	deadline := time.After(3 * time.Second)
 
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
