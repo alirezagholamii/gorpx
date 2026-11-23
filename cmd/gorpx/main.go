@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"log"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
+	"github.com/alirezagholamii/gorpx/internal/proxy"
 	"github.com/alirezagholamii/gorpx/internal/server"
 )
 
@@ -21,17 +23,24 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
+	if err := run(); err != nil {
+		slog.Error("Gorpx failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	configPath := flag.String("config", "gorpx.yaml", "config file path")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	srv, runners, err := server.NewWithHealth(cfg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	signalCtx, stop := signal.NotifyContext(
@@ -40,6 +49,21 @@ func main() {
 		syscall.SIGTERM,
 	)
 	defer stop()
+
+	return serve(signalCtx, stop, srv, runners, 10*time.Second)
+}
+
+func serve(
+	signalCtx context.Context,
+	stop context.CancelFunc,
+	srv *http.Server,
+	runners []proxy.HealthRunner,
+	shutdownTimeout time.Duration,
+) error {
+	listener, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", srv.Addr, err)
+	}
 
 	healthCtx, cancelHealth := context.WithCancel(context.Background())
 
@@ -62,35 +86,43 @@ func main() {
 	serverErr := make(chan error, 1)
 
 	go func() {
-		serverErr <- srv.ListenAndServe()
-	}()
-
-	log.Printf("Gorpx listening on %s", srv.Addr)
-
-	select {
-	case err := <-serverErr:
+		err := srv.Serve(listener)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("HTTP server failed: %v", err)
+			serverErr <- fmt.Errorf("HTTP server failed: %w", err)
 			return
 		}
-		return
+		serverErr <- nil
+	}()
+
+	slog.Info("Gorpx listening", "address", listener.Addr().String())
+	select {
+	case err := <-serverErr:
+		return err
 
 	case <-signalCtx.Done():
-		log.Println("Shutting down Gorpx...")
+		slog.Info("Shutting down Gorpx...")
 	}
 
 	stop()
 
 	shutdownCtx, cancel := context.WithTimeout(
 		context.Background(),
-		10*time.Second,
+		shutdownTimeout,
 	)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Graceful shutdown failed: %v", err)
-		return
+		shutdownErr := fmt.Errorf("graceful shutdown failed: %w", err)
+		if err := srv.Close(); err != nil {
+			return errors.Join(shutdownErr, fmt.Errorf("force-close HTTP server: %w", err))
+		}
+		return shutdownErr
 	}
 
-	log.Println("Gorpx stopped")
+	if err := <-serverErr; err != nil {
+		return err
+	}
+
+	slog.Info("Gorpx stopped")
+	return nil
 }
