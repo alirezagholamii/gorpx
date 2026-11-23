@@ -50,6 +50,7 @@ func (s *healthScheduler) Run(ctx context.Context) {
 	}
 
 	wg.Wait()
+	s.client.CloseIdleConnections()
 }
 
 func (s *healthScheduler) monitor(

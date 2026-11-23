@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -49,11 +51,17 @@ func TestCheckHealth(t *testing.T) {
 	}
 
 	client := newHealthClient()
+	t.Cleanup(client.CloseIdleConnections)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(
 				func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/redirect-target" {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+
 					if r.URL.Path != "/health" {
 						t.Errorf(
 							"path = %q, want /health",
@@ -65,6 +73,9 @@ func TestCheckHealth(t *testing.T) {
 						time.Sleep(tt.delay)
 					}
 
+					if tt.status == http.StatusFound {
+						w.Header().Set("Location", "/redirect-target")
+					}
 					w.WriteHeader(tt.status)
 				},
 			))
@@ -91,6 +102,41 @@ func TestCheckHealth(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestCheckHealthReusesConnection(t *testing.T) {
+	var connections atomic.Int32
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	))
+	backend.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	backend.Start()
+	t.Cleanup(backend.Close)
+
+	target, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newHealthClient()
+	t.Cleanup(client.CloseIdleConnections)
+	if client.Transport == nil || client.Transport == http.DefaultTransport {
+		t.Fatal("probe client must own its transport")
+	}
+
+	for range 2 {
+		if err := checkHealth(t.Context(), client, target, "/health", 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := connections.Load(); got != 1 {
+		t.Errorf("two successful probes opened %d connections, want 1", got)
 	}
 }
 

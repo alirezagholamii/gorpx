@@ -10,6 +10,7 @@ import (
 
 func newHealthClient() *http.Client {
 	return &http.Client{
+		Transport: http.DefaultTransport.(*http.Transport).Clone(),
 		CheckRedirect: func(
 			req *http.Request,
 			via []*http.Request,
