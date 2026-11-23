@@ -15,12 +15,13 @@ Built for simplicity, Gorpx provides configurable routing, structured logging, a
 - Structured request logging
 - Graceful shutdown
 - Basic upstream error handling
+- Optional active upstream health checks
 
 ## Getting Started
 
 ### Requirements
 
-- Go 1.22 or later (use the version specified in `go.mod`)
+- Go 1.27.4 or later (see `go.mod`)
 
 ### Installation
 
