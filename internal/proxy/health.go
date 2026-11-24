@@ -9,8 +9,12 @@ import (
 )
 
 func newHealthClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// A TLS handshake can outlive its probe's deadline.
+	transport.MaxConnsPerHost = 1
+
 	return &http.Client{
-		Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		Transport: transport,
 		CheckRedirect: func(
 			req *http.Request,
 			via []*http.Request,

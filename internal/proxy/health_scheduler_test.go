@@ -2,10 +2,13 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,6 +160,95 @@ func TestHealthSchedulerClosesIdleConnections(t *testing.T) {
 	cancel()
 	waitForProbeSignal(t, done, "scheduler to stop after cancellation")
 	waitForProbeSignal(t, closed, "idle probe connection to close")
+}
+
+func TestHealthSchedulerLimitsStalledTLSConnections(t *testing.T) {
+	handshakeStarted := make(chan struct{})
+	releaseHandshake := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseHandshake) })
+	var connections, handshakes atomic.Int32
+
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	backend.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	backend.TLS = &tls.Config{
+		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			if handshakes.Add(1) == 1 {
+				close(handshakeStarted)
+				<-releaseHandshake
+				return nil, errors.New("stalled test handshake released")
+			}
+			return nil, nil
+		},
+	}
+	backend.StartTLS()
+	t.Cleanup(backend.Close)
+	t.Cleanup(release)
+
+	target, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := newRoundRobin([]*url.URL{target})
+	scheduler := newHealthScheduler(selector, "/health", 250*time.Millisecond, 200*time.Millisecond)
+	transport := scheduler.client.Transport.(*http.Transport)
+	transport.TLSClientConfig = backend.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	results := make(chan error, 8)
+	scheduler.client.Transport = healthProbeRecorder{Transport: transport, results: results}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scheduler.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		release()
+		waitForProbeSignal(t, done, "scheduler to stop after cancellation")
+	}()
+
+	waitForProbeSignal(t, handshakeStarted, "first TLS handshake to stall")
+	for range 3 {
+		select {
+		case err := <-results:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("stalled probe error = %v, want deadline exceeded", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("stalled probe did not return by its deadline")
+		}
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("stalled probes opened %d TCP connections, want 1", got)
+	}
+	waitForHealth(t, selector, false)
+
+	// The failed handshake must free the slot for a new connection.
+	release()
+	waitForHealth(t, selector, true)
+	if got := connections.Load(); got < 2 {
+		t.Errorf("recovery did not open a new TCP connection, got %d total", got)
+	}
+}
+
+type healthProbeRecorder struct {
+	*http.Transport
+	results chan<- error
+}
+
+func (r healthProbeRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := r.Transport.RoundTrip(req)
+	select {
+	case r.results <- err:
+	default:
+	}
+	return resp, err
 }
 
 func waitForProbeSignal(t *testing.T, signal <-chan struct{}, event string) {
