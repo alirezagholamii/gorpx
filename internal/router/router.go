@@ -40,6 +40,10 @@ func NewWithHealth(
 			)
 		}
 
+		if err := config.ValidateRouteHealthCheck(route); err != nil {
+			return nil, nil, err
+		}
+
 		if hasRoot {
 			if route.ResponseHeaderTimeout != "" {
 				return nil, nil, fmt.Errorf(

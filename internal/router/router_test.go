@@ -115,3 +115,79 @@ func TestConstructorsWithHealth(t *testing.T) {
 		t.Errorf("NewWithHealth() runners = %v, want one non-nil runner", runners)
 	}
 }
+
+func TestNewWithHealthValidation(t *testing.T) {
+	upstreamRoute := config.Route{
+		Path:      "/api/",
+		Upstreams: []string{"http://localhost:3000"},
+	}
+	valid := config.HealthCheck{Path: "/health", Interval: "10s", Timeout: "2s"}
+	invalid := valid
+	invalid.Path = "/../health"
+	validRoute := upstreamRoute
+	validRoute.HealthCheck = &valid
+	invalidRoute := upstreamRoute
+	invalidRoute.HealthCheck = &invalid
+
+	tests := []struct {
+		name        string
+		route       config.Route
+		wantErr     string
+		wantRunners int
+	}{
+		{
+			name: "static route with health check",
+			route: config.Route{
+				Path:        "/static/",
+				Root:        t.TempDir(),
+				HealthCheck: &valid,
+			},
+			wantErr: "health_check is only valid for upstream routes",
+		},
+		{
+			name:    "invalid probe path",
+			route:   invalidRoute,
+			wantErr: "invalid health check path",
+		},
+		{
+			name:        "valid health check",
+			route:       validRoute,
+			wantRunners: 1,
+		},
+		{
+			name:  "health checks omitted",
+			route: upstreamRoute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Routes = []config.Route{tt.route}
+			configErr := config.Validate(cfg)
+			handler, runners, err := NewWithHealth(cfg.Routes)
+			if tt.wantErr != "" {
+				if configErr == nil || !strings.Contains(configErr.Error(), tt.wantErr) {
+					t.Fatalf("config.Validate() error = %v, want %q", configErr, tt.wantErr)
+				}
+				if err == nil || err.Error() != configErr.Error() {
+					t.Fatalf("NewWithHealth() error = %v, want config validation error %v", err, configErr)
+				}
+				if handler != nil || len(runners) != 0 {
+					t.Fatal("NewWithHealth() returned a handler or runner for an invalid route")
+				}
+				return
+			}
+
+			if configErr != nil {
+				t.Fatalf("config.Validate() rejected a valid route: %v", configErr)
+			}
+			if err != nil || handler == nil {
+				t.Fatalf("NewWithHealth() = %v, %v, want a handler", handler, err)
+			}
+			if len(runners) != tt.wantRunners || (tt.wantRunners > 0 && runners[0] == nil) {
+				t.Errorf("NewWithHealth() runners = %v, want %d non-nil runners", runners, tt.wantRunners)
+			}
+		})
+	}
+}

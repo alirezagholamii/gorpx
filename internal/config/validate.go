@@ -155,60 +155,71 @@ func Validate(cfg Config) error {
 			}
 		}
 
-		if hc := route.HealthCheck; hc != nil {
-			if hasRoot {
-				return fmt.Errorf(
-					"route %q: health_check is only valid for upstream routes",
-					route.Path,
-				)
-			}
-
-			if !strings.HasPrefix(hc.Path, "/") ||
-				strings.HasPrefix(hc.Path, "//") ||
-				strings.ContainsAny(hc.Path, "?#{}%\\ \t\r\n") {
-				return fmt.Errorf(
-					"route %q: invalid health check path %q",
-					route.Path,
-					hc.Path,
-				)
-			}
-
-			for _, segment := range strings.Split(hc.Path, "/") {
-				if segment == "." || segment == ".." {
-					return fmt.Errorf(
-						"route %q: invalid health check path %q",
-						route.Path,
-						hc.Path,
-					)
-				}
-			}
-
-			interval, err := time.ParseDuration(hc.Interval)
-			if err != nil || interval <= 0 {
-				return fmt.Errorf(
-					"route %q: invalid health check interval %q",
-					route.Path,
-					hc.Interval,
-				)
-			}
-
-			timeout, err := time.ParseDuration(hc.Timeout)
-			if err != nil || timeout <= 0 {
-				return fmt.Errorf(
-					"route %q: invalid health check timeout %q",
-					route.Path,
-					hc.Timeout,
-				)
-			}
-
-			if timeout > interval {
-				return fmt.Errorf(
-					"route %q: health check timeout must not exceed interval",
-					route.Path,
-				)
-			}
+		if err := ValidateRouteHealthCheck(route); err != nil {
+			return err
 		}
+	}
 
+	return nil
+}
+
+// ValidateRouteHealthCheck validates health-check settings after defaults are applied.
+func ValidateRouteHealthCheck(route Route) error {
+	hc := route.HealthCheck
+	if hc == nil {
+		return nil
+	}
+
+	if route.Root != "" {
+		return fmt.Errorf(
+			"route %q: health_check is only valid for upstream routes",
+			route.Path,
+		)
+	}
+
+	if !strings.HasPrefix(hc.Path, "/") ||
+		strings.HasPrefix(hc.Path, "//") ||
+		strings.ContainsAny(hc.Path, "?#{}%\\ \t\r\n") {
+		return fmt.Errorf(
+			"route %q: invalid health check path %q",
+			route.Path,
+			hc.Path,
+		)
+	}
+
+	for _, segment := range strings.Split(hc.Path, "/") {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf(
+				"route %q: invalid health check path %q",
+				route.Path,
+				hc.Path,
+			)
+		}
+	}
+
+	interval, err := time.ParseDuration(hc.Interval)
+	if err != nil || interval <= 0 {
+		return fmt.Errorf(
+			"route %q: invalid health check interval %q",
+			route.Path,
+			hc.Interval,
+		)
+	}
+
+	timeout, err := time.ParseDuration(hc.Timeout)
+	if err != nil || timeout <= 0 {
+		return fmt.Errorf(
+			"route %q: invalid health check timeout %q",
+			route.Path,
+			hc.Timeout,
+		)
+	}
+
+	if timeout > interval {
+		return fmt.Errorf(
+			"route %q: health check timeout must not exceed interval",
+			route.Path,
+		)
 	}
 
 	return nil
