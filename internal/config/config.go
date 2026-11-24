@@ -13,11 +13,18 @@ type Server struct {
 	MaxBodyBytes      int64  `yaml:"max_body_bytes"`
 }
 
+type HealthCheck struct {
+	Path     string `yaml:"path"`
+	Interval string `yaml:"interval"`
+	Timeout  string `yaml:"timeout"`
+}
+
 type Route struct {
-	Path                  string   `yaml:"path"`
-	Upstreams             []string `yaml:"upstreams"`
-	Root                  string   `yaml:"root"`
-	ResponseHeaderTimeout string   `yaml:"response_header_timeout"`
+	Path                  string       `yaml:"path"`
+	Upstreams             []string     `yaml:"upstreams"`
+	Root                  string       `yaml:"root"`
+	ResponseHeaderTimeout string       `yaml:"response_header_timeout"`
+	HealthCheck           *HealthCheck `yaml:"health_check"`
 }
 
 type Config struct {

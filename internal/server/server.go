@@ -8,33 +8,36 @@ import (
 
 	"github.com/alirezagholamii/gorpx/internal/config"
 	"github.com/alirezagholamii/gorpx/internal/middleware"
+	"github.com/alirezagholamii/gorpx/internal/proxy"
 	"github.com/alirezagholamii/gorpx/internal/router"
 )
 
-func New(cfg config.Config) (*http.Server, error) {
+func NewWithHealth(
+	cfg config.Config,
+) (*http.Server, []proxy.HealthRunner, error) {
 	cfg = config.ApplyDefaults(cfg)
 
 	if err := config.Validate(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	readHeaderTimeout, err := time.ParseDuration(
 		cfg.Server.ReadHeaderTimeout,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("parse read header timeout: %w", err)
+		return nil, nil, fmt.Errorf("parse read header timeout: %w", err)
 	}
 
 	idleTimeout, err := time.ParseDuration(
 		cfg.Server.IdleTimeout,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("parse idle timeout: %w", err)
+		return nil, nil, fmt.Errorf("parse idle timeout: %w", err)
 	}
 
-	routes, err := router.New(cfg.Routes)
+	routes, runners, err := router.NewWithHealth(cfg.Routes)
 	if err != nil {
-		return nil, fmt.Errorf("create router: %w", err)
+		return nil, nil, fmt.Errorf("create router: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -60,5 +63,16 @@ func New(cfg config.Config) (*http.Server, error) {
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
-	}, nil
+	}, runners, nil
+}
+
+func New(cfg config.Config) (*http.Server, error) {
+	for _, route := range cfg.Routes {
+		if route.HealthCheck != nil {
+			return nil, fmt.Errorf("route %q: health_check requires server.NewWithHealth()", route.Path)
+		}
+	}
+
+	srv, _, err := NewWithHealth(cfg)
+	return srv, err
 }

@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"reflect"
+	"sync"
+	"testing"
+)
 
 func TestApplyDefaults(t *testing.T) {
 	tests := []struct {
@@ -113,5 +117,74 @@ func TestApplyCustomRequestLimits(t *testing.T) {
 			result.Server.MaxBodyBytes,
 			20<<20,
 		)
+	}
+}
+
+func TestApplyHealthCheckDefaults(t *testing.T) {
+	health := &HealthCheck{Path: "/ready"}
+	cfg := Config{
+		Routes: []Route{
+			{Path: "/default/", HealthCheck: &HealthCheck{}},
+			{Path: "/custom/", HealthCheck: health},
+			{Path: "/disabled/"},
+		},
+	}
+	wantInput := Config{
+		Routes: []Route{
+			{Path: "/default/", HealthCheck: &HealthCheck{}},
+			{Path: "/custom/", HealthCheck: &HealthCheck{Path: "/ready"}},
+			{Path: "/disabled/"},
+		},
+	}
+
+	got := ApplyDefaults(cfg)
+	for i, want := range []HealthCheck{
+		{Path: "/health", Interval: "10s", Timeout: "2s"},
+		{Path: "/ready", Interval: "10s", Timeout: "2s"},
+	} {
+		if check := got.Routes[i].HealthCheck; check == nil || *check != want {
+			t.Errorf("route %d health check = %+v, want %+v", i, check, want)
+		}
+	}
+	if got.Routes[2].HealthCheck != nil {
+		t.Error("ApplyDefaults enabled health checks on a route without them")
+	}
+	if !reflect.DeepEqual(cfg, wantInput) {
+		t.Error("ApplyDefaults modified the input configuration")
+	}
+	if cfg.Routes[1].HealthCheck != health || *health != (HealthCheck{Path: "/ready"}) {
+		t.Error("ApplyDefaults modified the original route entry or health check")
+	}
+	if &got.Routes[0] == &cfg.Routes[0] {
+		t.Error("defaulted config still shares the original route slice")
+	}
+	if got.Routes[1].HealthCheck == health {
+		t.Error("defaulted route still shares the original health check")
+	}
+	if twice := ApplyDefaults(got); !reflect.DeepEqual(got, twice) {
+		t.Error("applying defaults twice changed the result")
+	}
+}
+
+func TestApplyHealthCheckDefaultsConcurrently(t *testing.T) {
+	health := &HealthCheck{}
+	cfg := Config{Routes: []Route{{HealthCheck: health}}}
+	var results [2]Config
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Go(func() {
+			<-start
+			results[i] = ApplyDefaults(cfg)
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	if !reflect.DeepEqual(results[0], results[1]) {
+		t.Error("concurrent calls produced different configurations")
+	}
+	if cfg.Routes[0].HealthCheck != health || *health != (HealthCheck{}) {
+		t.Error("concurrent calls modified the input route or health check")
 	}
 }

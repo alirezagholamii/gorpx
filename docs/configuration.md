@@ -39,7 +39,7 @@ routes:
 |---|---|
 | `server.address` | Address and port on which Gorpx listens |
 
-If the address is omitted, Gorpx uses the default of `:8080`.
+Set `server.address` in the configuration file. Use `:8080` to listen on all interfaces.
 
 For local development, prefer `127.0.0.1:8080` to avoid exposing the listener on external network interfaces.
 
@@ -53,6 +53,7 @@ Each route contains a `path` and exactly one destination type.
 | `upstreams` | Non-empty list of HTTP or HTTPS destinations |
 | `root` | Local directory containing static files |
 | `response_header_timeout` | Optional timeout for reverse-proxy routes |
+| `health_check` | Optional [upstream health checks](#upstream-health-checks) for reverse-proxy routes |
 
 Routes use literal URL path prefixes. Wildcard patterns are not supported.
 
@@ -101,13 +102,47 @@ Under concurrent traffic, selection remains balanced, but responses may complete
 
 **Failure behaviour:**
 
-- Gorpx does not currently perform active upstream health checks.
-- Unavailable upstreams remain in the round-robin rotation.
-- Connection failures and upstream response-header timeouts normally result in HTTP 502 Bad Gateway.
-- Gorpx does not automatically retry failed requests against another upstream.
-- Requests are not automatically replayed, including POST requests.
+- When health checks are disabled, unavailable upstreams remain in the round-robin rotation.
+- When Gorpx cannot connect to the selected upstream or times out waiting for its response headers, it normally returns HTTP 502 Bad Gateway.
+- Gorpx does not retry failed requests against another upstream.
 
 Round-robin distributes requests by selection count. It does not consider backend load, response times or connection counts.
+
+### Upstream health checks
+
+Starting in v0.5.0, reverse-proxy routes can enable active health checks with a `health_check` block. The block works with one or more upstreams. Omitting it disables health checks for the route.
+
+```yaml
+routes:
+  - path: /api/
+    upstreams:
+      - http://localhost:9001
+      - http://localhost:9002
+    health_check:
+      path: /health
+      interval: 10s
+      timeout: 2s
+```
+
+Within an enabled block, omitted or empty settings use these defaults.
+
+| Setting | Default | Description |
+|---|---|---|
+| `path` | `/health` | Path requested directly on each upstream |
+| `interval` | `10s` | Interval between probe ticks |
+| `timeout` | `2s` | Time limit for the probe to receive response headers |
+
+All upstreams are initially treated as healthy. Gorpx sends an HTTP GET probe to the configured path on each upstream as soon as monitoring starts, then probes periodically. An HTTP 2xx status marks the upstream healthy. Any other status, a timeout or a connection error marks it unhealthy. Gorpx does not follow redirects.
+
+Round-robin selection skips unhealthy upstreams. A successful probe returns a recovered upstream to the rotation. When all upstreams on a route are marked unhealthy, Gorpx returns HTTP 503 Service Unavailable for requests to that route.
+
+**Validation rules**
+
+- Only reverse-proxy routes with `upstreams` can use `health_check`.
+- The probe path must start with `/`. It cannot start with `//` or contain `?`, `#`, `{`, `}`, `%`, backslashes, spaces, tabs, carriage returns or line feeds. Path segments of `.` or `..` are also rejected.
+- `interval` and `timeout` must be positive Go durations. The timeout must not exceed the interval.
+
+Invalid health-check settings prevent Gorpx from starting.
 
 ### Static files
 
@@ -276,7 +311,7 @@ The generated request ID is restored in outgoing proxy requests after hop-by-hop
 
 ### Upstream error logging
 
-When a reverse-proxy operation fails, Gorpx records a structured error log containing:
+When a request to a selected upstream fails before response headers are sent, Gorpx records a structured error log containing:
 
 - The selected upstream host.
 - The request path.
@@ -359,8 +394,8 @@ Configurations that omit the timeout use the default of 15 seconds.
 ## Limitations
 
 - No automatic HTTPS or certificate management.
-- No active upstream health checks.
-- No automatic upstream failover or request retries.
+- No passive upstream health checks or circuit breakers.
+- No automatic retries of failed proxied requests at the routing layer.
 - No weighted or least-connections load balancing.
 - No configuration hot reloading.
 - No URL prefix rewriting.

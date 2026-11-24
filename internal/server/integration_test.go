@@ -2,14 +2,17 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -956,4 +959,258 @@ func TestIntegrationRequestIDConnectionHeader(t *testing.T) {
 			responseID,
 		)
 	}
+}
+
+func TestIntegrationHealthCheckRecovery(t *testing.T) {
+	var healthy atomic.Bool
+	healthy.Store(true)
+
+	backend := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				if !healthy.Load() {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			_, _ = w.Write([]byte("backend response"))
+		},
+	))
+	defer backend.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:      "/api/",
+				Upstreams: []string{backend.URL},
+				HealthCheck: &config.HealthCheck{
+					Path:     "/health",
+					Interval: "250ms",
+					Timeout:  "200ms",
+				},
+			},
+		},
+	}
+
+	srv, runners, err := NewWithHealth(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runners) != 1 {
+		t.Fatalf("runners = %d, want 1", len(runners))
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		runners[0].Run(ctx)
+	}()
+
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("health scheduler did not stop")
+		}
+	}()
+
+	client := gorpx.Client()
+	client.Timeout = time.Second
+	endpoint := gorpx.URL + "/api/test"
+
+	// Initially the backend is available.
+	waitForHealthRouting(t, client, endpoint, http.StatusOK, nil)
+
+	// The health endpoint starts failing.
+	healthy.Store(false)
+
+	// Gorpx must exclude the unhealthy backend.
+	waitForHealthRouting(t, client, endpoint, http.StatusServiceUnavailable, nil)
+
+	// The backend becomes healthy again.
+	healthy.Store(true)
+
+	// Gorpx must automatically resume forwarding requests.
+	waitForHealthRouting(t, client, endpoint, http.StatusOK, nil)
+}
+
+func TestIntegrationHealthAwareRoundRobin(t *testing.T) {
+	var healthyA, healthyB atomic.Bool
+	healthyA.Store(true)
+	healthyB.Store(true)
+
+	newBackend := func(name string, healthy *atomic.Bool) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					if !healthy.Load() {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+
+				_, _ = w.Write([]byte(name))
+			},
+		))
+	}
+
+	backendA := newBackend("backend-a", &healthyA)
+	defer backendA.Close()
+
+	backendB := newBackend("backend-b", &healthyB)
+	defer backendB.Close()
+
+	cfg := config.Config{
+		Server: config.Server{
+			Address: "127.0.0.1:8080",
+		},
+		Routes: []config.Route{
+			{
+				Path:      "/api/",
+				Upstreams: []string{backendA.URL, backendB.URL},
+				HealthCheck: &config.HealthCheck{
+					Path:     "/health",
+					Interval: "250ms",
+					Timeout:  "200ms",
+				},
+			},
+		},
+	}
+
+	srv, runners, err := NewWithHealth(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runners) != 1 {
+		t.Fatalf("health runners = %d, want 1", len(runners))
+	}
+
+	gorpx := httptest.NewServer(srv.Handler)
+	defer gorpx.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		runners[0].Run(ctx)
+	}()
+
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("health scheduler did not stop")
+		}
+	}()
+
+	client := gorpx.Client()
+	client.Timeout = time.Second
+	endpoint := gorpx.URL + "/api/test"
+
+	bothBackends := map[string]int{"backend-a": 2, "backend-b": 2}
+
+	// Both backends initially healthy.
+	waitForHealthRouting(t, client, endpoint, http.StatusOK, bothBackends)
+
+	// Backend B becomes unhealthy.
+	healthyB.Store(false)
+	waitForHealthRouting(t, client, endpoint, http.StatusOK, map[string]int{"backend-a": 4})
+
+	// Backend A also becomes unhealthy.
+	healthyA.Store(false)
+	waitForHealthRouting(t, client, endpoint, http.StatusServiceUnavailable, nil)
+
+	// Backend B recovers.
+	healthyB.Store(true)
+	waitForHealthRouting(t, client, endpoint, http.StatusOK, map[string]int{"backend-b": 4})
+
+	// Backend A recovers.
+	healthyA.Store(true)
+	waitForHealthRouting(t, client, endpoint, http.StatusOK, bothBackends)
+}
+
+func waitForHealthRouting(
+	t *testing.T,
+	client *http.Client,
+	endpoint string,
+	wantStatus int,
+	wantBackends map[string]int,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	requests := 0
+	for _, count := range wantBackends {
+		requests += count
+	}
+
+	var status int
+	var err error
+	var seen map[string]int
+	for ctx.Err() == nil {
+		seen = make(map[string]int)
+		for range max(1, requests) {
+			var body string
+			status, body, err = backendResponse(ctx, client, endpoint)
+			if err != nil || status != wantStatus {
+				break
+			}
+			if requests > 0 {
+				seen[body]++
+			}
+		}
+		if err == nil && status == wantStatus && maps.Equal(seen, wantBackends) {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
+	}
+
+	t.Fatalf("routing at %q: got HTTP %d, backends %v, error %v; want HTTP %d, backends %v",
+		endpoint, status, seen, err, wantStatus, wantBackends)
+}
+
+func backendResponse(
+	ctx context.Context,
+	client *http.Client,
+	endpoint string,
+) (int, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body), err
 }
