@@ -1,0 +1,35 @@
+package config
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"go.yaml.in/yaml/v3"
+)
+
+func TestHarnessConfigErrorPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid config.yaml")
+	if err := os.WriteFile(path, []byte("unexpected_field: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	var yamlErr *yaml.TypeError
+	if err == nil || !strings.Contains(err.Error(), path) || !errors.As(err, &yamlErr) {
+		t.Fatalf("Load error = %v, want path %q and wrapped YAML type error", err, path)
+	}
+	if err := os.WriteFile(path, []byte("server: [\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("malformed YAML error = %v, want path %q", err, path)
+	}
+	if err := os.WriteFile(path, []byte("{}\n---\n{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || err.Error() != "config must contain exactly one YAML document" {
+		t.Fatalf("multi-document error = %v", err)
+	}
+}

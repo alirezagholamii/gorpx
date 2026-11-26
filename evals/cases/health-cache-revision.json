@@ -1,0 +1,13 @@
+{
+  "turns": [
+    "Add Cache-Control: no-store to successful responses from Gorpx's built-in /health endpoint. Preserve the existing status, OK body and behavior of other endpoints. Scope changes to internal/server/server.go and internal/server/server_test.go. Add a focused TestHealthCacheControl using httptest.NewRecorder and run go test ./internal/server -run '^TestHealthCacheControl$'.",
+    "The monitoring client needs revalidation, so supersede the previous header requirement. Set Cache-Control to exactly no-cache on built-in /health responses instead, including HEAD, with no no-store value. Keep status, GET body, middleware behavior and unrelated routes as before. Update your prior test, keep the same file scope, and run go test ./internal/server -run '^TestHealthCacheControl$' again."
+  ],
+  "allowed_files": [
+    "internal/server/server.go",
+    "internal/server/server_test.go"
+  ],
+  "required_file": "internal/server/server.go",
+  "check_package": "internal/server",
+  "required_command": "go test"
+}

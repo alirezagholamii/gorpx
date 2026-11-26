@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -24,20 +26,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check formatting
+      - name: Verify Gorpx
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          files=$(gofmt -l $(git ls-files '*.go'))
-          if [ -n "$files" ]; then
-            echo "Unformatted Go files:"
-            echo "$files"
-            exit 1
+          base_ref="$BASE_REF"
+          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then
+            base_ref=HEAD^
           fi
-
-      - name: Run static analysis
-        run: go vet ./...
-
-      - name: Run tests with race detector
-        run: go test -race -count=1 ./...
-
-      - name: Build Gorpx
-        run: go build -o gorpx ./cmd/gorpx
+          ./scripts/verify.sh "$base_ref"
