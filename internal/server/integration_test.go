@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,6 +209,119 @@ func TestIntegrationStreamedBodyLimit(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream did not finish reading")
 	}
+}
+
+func TestIntegrationBodyReadTimeout(t *testing.T) {
+	const readTimeout = 750 * time.Millisecond
+	type uploadResult struct {
+		body string
+		err  error
+	}
+	uploads := make(chan uploadResult, 2)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		uploads <- uploadResult{body: string(body), err: err}
+		if err == nil {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(backend.Close)
+
+	srv, err := New(config.Config{
+		Server: config.Server{Address: "127.0.0.1:8080", BodyReadTimeout: readTimeout.String()},
+		Routes: []config.Route{{Path: "/api/", Upstreams: []string{backend.URL}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gorpx := httptest.NewServer(srv.Handler)
+	t.Cleanup(gorpx.Close)
+	client := gorpx.Client()
+	client.Timeout = 5 * time.Second
+
+	t.Run("stalled upload releases upstream", func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer writer.Close()
+		requestDone := make(chan int, 1)
+		go func() {
+			resp, err := client.Post(gorpx.URL+"/api/upload", "text/plain", reader)
+			if err != nil {
+				requestDone <- 0 // The connection closed before an HTTP response.
+				return
+			}
+			resp.Body.Close()
+			requestDone <- resp.StatusCode
+		}()
+		if _, err := io.WriteString(writer, "a"); err != nil {
+			t.Fatal(err)
+		}
+
+		// Keep the pipe open until Gorpx ends the upstream request.
+		select {
+		case got := <-uploads:
+			if got.body != "a" || got.err == nil {
+				t.Errorf("upstream read %q with error %v, want interrupted partial upload", got.body, got.err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("upstream was still reading after the body read deadline")
+		}
+		writer.Close()
+		if status := <-requestDone; status != 0 && status < 400 {
+			t.Errorf("stalled upload returned status %d, want error or closed connection", status)
+		}
+	})
+
+	t.Run("progressing upload and keep-alive", func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer writer.Close()
+		writeDone := make(chan error, 1)
+		go func() {
+			defer writer.Close()
+			for i, chunk := range []string{"a", "b", "c", "d"} {
+				if i > 0 {
+					time.Sleep(300 * time.Millisecond)
+				}
+				if _, err := io.WriteString(writer, chunk); err != nil {
+					writeDone <- err
+					return
+				}
+			}
+			writeDone <- nil
+		}()
+
+		resp, err := client.Post(gorpx.URL+"/api/upload", "text/plain", reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if err := <-writeDone; err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("upload status = %d, want 204", resp.StatusCode)
+		}
+		if got := <-uploads; got.body != "abcd" || got.err != nil {
+			t.Fatalf("upstream read %q with error %v, want complete upload", got.body, got.err)
+		}
+
+		time.Sleep(readTimeout)
+		var reused bool
+		ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+		})
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, gorpx.URL+"/health", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err = client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !reused {
+			t.Errorf("health status = %d, reused connection = %t, want 200 on the same connection", resp.StatusCode, reused)
+		}
+	})
 }
 
 func TestIntegrationUpstreamUnavailable(t *testing.T) {

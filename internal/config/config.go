@@ -8,6 +8,7 @@ import (
 type Server struct {
 	Address           string `yaml:"address"`
 	ReadHeaderTimeout string `yaml:"read_header_timeout"`
+	BodyReadTimeout   string `yaml:"body_read_timeout"`
 	IdleTimeout       string `yaml:"idle_timeout"`
 	MaxHeaderBytes    int    `yaml:"max_header_bytes"`
 	MaxBodyBytes      int64  `yaml:"max_body_bytes"`
@@ -37,6 +38,7 @@ func Default() Config {
 		Server: Server{
 			Address:           ":8080",
 			ReadHeaderTimeout: "5s",
+			BodyReadTimeout:   "30s",
 			IdleTimeout:       "60s",
 			MaxHeaderBytes:    16 << 10,
 			MaxBodyBytes:      10 << 20,

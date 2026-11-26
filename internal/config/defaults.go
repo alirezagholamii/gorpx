@@ -10,6 +10,10 @@ func ApplyDefaults(cfg Config) Config {
 			defaults.Server.ReadHeaderTimeout
 	}
 
+	if cfg.Server.BodyReadTimeout == "" {
+		cfg.Server.BodyReadTimeout = defaults.Server.BodyReadTimeout
+	}
+
 	if cfg.Server.IdleTimeout == "" {
 		cfg.Server.IdleTimeout =
 			defaults.Server.IdleTimeout

@@ -12,6 +12,7 @@ func TestLoad(t *testing.T) {
 	data := []byte(`
 server:
   address: ":9090"
+  body_read_timeout: 750ms
 
 routes:
   - path: /api/
@@ -34,6 +35,9 @@ routes:
 			"address = %q, want :9090",
 			cfg.Server.Address,
 		)
+	}
+	if cfg.Server.BodyReadTimeout != "750ms" {
+		t.Errorf("body read timeout = %q, want 750ms", cfg.Server.BodyReadTimeout)
 	}
 
 	if len(cfg.Routes) != 1 {
@@ -80,6 +84,9 @@ routes:
 			"ReadHeaderTimeout = %q, want 5s",
 			cfg.Server.ReadHeaderTimeout,
 		)
+	}
+	if cfg.Server.BodyReadTimeout != "30s" {
+		t.Errorf("body read timeout = %q, want 30s", cfg.Server.BodyReadTimeout)
 	}
 
 	if cfg.Server.IdleTimeout != "60s" {
