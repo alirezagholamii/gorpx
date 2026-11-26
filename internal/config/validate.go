@@ -26,6 +26,7 @@ func Validate(cfg Config) error {
 		value string
 	}{
 		{"read_header_timeout", cfg.Server.ReadHeaderTimeout},
+		{"body_read_timeout", cfg.Server.BodyReadTimeout},
 		{"idle_timeout", cfg.Server.IdleTimeout},
 	}
 

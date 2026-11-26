@@ -265,6 +265,10 @@ func TestValidateServerTimeouts(t *testing.T) {
 		{"missing unit", "idle", "5", true},
 		{"zero duration", "read_header", "0s", true},
 		{"negative duration", "idle", "-5s", true},
+		{"valid body read timeout", "body_read", "750ms", false},
+		{"invalid body read timeout", "body_read", "hello", true},
+		{"zero body read timeout", "body_read", "0s", true},
+		{"negative body read timeout", "body_read", "-1s", true},
 	}
 
 	for _, tt := range tests {
@@ -284,6 +288,8 @@ func TestValidateServerTimeouts(t *testing.T) {
 			switch tt.field {
 			case "read_header":
 				cfg.Server.ReadHeaderTimeout = tt.value
+			case "body_read":
+				cfg.Server.BodyReadTimeout = tt.value
 			case "idle":
 				cfg.Server.IdleTimeout = tt.value
 			}

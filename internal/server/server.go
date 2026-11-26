@@ -28,6 +28,11 @@ func NewWithHealth(
 		return nil, nil, fmt.Errorf("parse read header timeout: %w", err)
 	}
 
+	bodyReadTimeout, err := time.ParseDuration(cfg.Server.BodyReadTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse body read timeout: %w", err)
+	}
+
 	idleTimeout, err := time.ParseDuration(
 		cfg.Server.IdleTimeout,
 	)
@@ -56,7 +61,10 @@ func NewWithHealth(
 		Addr: cfg.Server.Address,
 		Handler: middleware.Logging(
 			middleware.RequestID(
-				middleware.BodyLimit(mux, cfg.Server.MaxBodyBytes),
+				middleware.BodyLimit(
+					middleware.BodyReadTimeout(mux, bodyReadTimeout),
+					cfg.Server.MaxBodyBytes,
+				),
 			),
 			slog.Default(),
 		),

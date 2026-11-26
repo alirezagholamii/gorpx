@@ -210,14 +210,16 @@ Gorpx supports configurable HTTP server timeouts.
 server:
   address: ":8080"
   read_header_timeout: 5s
+  body_read_timeout: 30s
   idle_timeout: 60s
 ```
 
-Both timeout settings are optional.
+All timeout settings are optional.
 
 | Setting | Default | Description |
 |---|---|---|
 | `read_header_timeout` | `5s` | Maximum time allowed to read incoming HTTP request headers |
+| `body_read_timeout` | `30s` | Maximum time Gorpx waits for each read from the client's request body |
 | `idle_timeout` | `60s` | Maximum time to wait for another request on an idle keep-alive connection |
 
 ### Supported duration formats
@@ -233,11 +235,17 @@ Timeout values must be greater than zero. Invalid, zero or negative durations ca
 
 ### Default values
 
-Configurations that omit timeout settings use the defaults of `5s` and `60s`.
+Omitted or empty timeout settings use the defaults in the table.
 
 ### Streaming
 
 These settings do not impose a maximum duration on an entire proxied request or response.
+
+Each read of a streamed upload gets a fresh `body_read_timeout`. An upload can
+take longer than this setting in total while reads keep making progress. If a
+body read times out after forwarding starts, the upstream may already have
+received part of the body. The client may receive a proxy error or a closed
+connection.
 
 Gorpx deliberately avoids a general write timeout for now to preserve streaming behaviour.
 
