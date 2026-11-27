@@ -1,104 +1,54 @@
-# Gorpx — Agent Instructions
+# Gorpx agent instructions
 
-## Project Overview
+Gorpx is a lightweight HTTP reverse proxy and static file server.
+The module is `github.com/alirezagholamii/gorpx`. Use the Go version in `go.mod`.
 
-Gorpx is a lightweight HTTP reverse proxy and static web server written in Go.
+## Repository map
 
-Module: `github.com/alirezagholamii/gorpx`
+| Path | Responsibility |
+| --- | --- |
+| `cmd/gorpx/` | CLI, config loading, listener and process lifecycle, health-runner startup, graceful shutdown |
+| `internal/config/` | Strict YAML decoding, defaults, config types and validation |
+| `internal/server/` | HTTP server settings, built-in endpoints and middleware composition |
+| `internal/router/` | Route validation and mounting proxy or static handlers |
+| `internal/proxy/` | Upstream transport, round-robin selection and active health checks |
+| `internal/static/` | Static file serving and filesystem confinement |
+| `internal/middleware/` | Request IDs, logging, body size and body-read deadlines |
+| `examples/`, `public/` | Runnable example configuration and static content |
+| `docs/`, `evals/` | Behavior documentation, task plans and opt-in coding agent regression cases |
 
-The project prioritises simplicity, reliability, security, and maintainability.
+## Working conventions
 
-## Development Principles
+- Keep `main.go` focused on startup and lifecycle. Put request handling in the owning package and compose it with `http.Handler`.
+- Prefer the standard library, explicit errors, focused changes and straightforward concurrency. Preserve existing behavior outside the requested scope.
+- Validate configuration and upstream destinations. Treat incoming forwarding headers and paths as untrusted. Keep client errors generic and credentials, request bodies and tokens out of logs.
+- Preserve timeout and shutdown behavior, streaming and response-writer capabilities. Give goroutines clear cancellation and cleanup ownership.
+- Add or update Go tests for behavior changes. Use `httptest` and temporary directories. Run `go fmt ./...` after editing Go.
+- Keep the README, architecture and configuration documentation accurate when changing documented behavior. Preserve the ISC license and copyright notices.
+- Stabilize current functionality. Get explicit approval for broad refactors or new capabilities such as automatic HTTPS, caching, plugins or a dashboard.
+- Copy `docs/plans/TEMPLATE.md` for multi-step work. Update it at checkpoints so a new session can resume from the last verified state.
 
-- Prefer simple, idiomatic Go.
-- Use Go's standard library whenever practical.
-- Keep changes small, focused, and easy to review.
-- Avoid unnecessary abstractions, interfaces, and dependencies.
-- Do not introduce features outside the requested scope.
-- Preserve existing behaviour unless a change is explicitly required.
-- Prioritise code clarity over clever implementations.
+## Commands
 
-## Project Structure
+| Command | Purpose |
+| --- | --- |
+| `./scripts/verify.sh [base-ref]` | Check guardrails, Go formatting, vet, race tests and the CLI build. Defaults to `HEAD`. |
+| `./scripts/install-hooks.sh` | Install the local pre-commit hook. It verifies the staged snapshot. |
+| `./scripts/build.sh` | Build `bin/gorpx`. |
+| `./scripts/run.sh [config]` | Build and run Gorpx. Defaults to `examples/basic.yaml`. |
+| `GORPX_RUN_EVALS=1 go test -v -count=1 -timeout=30m ./evals` | Run live coding agent evaluations from a committed baseline. Select the CLI with `AGENT_RUNNER`. See `evals/README.md`. |
 
-- `cmd/gorpx/` — CLI entry point and application startup.
-- `internal/config/` — Configuration loading and validation.
-- `internal/server/` — HTTP server setup and lifecycle.
-- `internal/router/` — Path-based request routing.
-- `internal/proxy/` — Reverse proxy implementation.
-- `internal/static/` — Static file serving.
-- `internal/middleware/` — HTTP middleware.
-- `docs/` — Architecture and configuration documentation.
+## Protected files and test coverage
 
-Keep `main.go` minimal. Do not move routing, proxying, or middleware logic into it.
+- Never modify `.git/`, `LICENSE`, the verification and hook scripts, `scripts/guardrails/`, `evals/`, or CI workflows during routine tasks. Changes to these paths require a task explicitly authorizing maintenance of that path.
+- Never modify `go.mod` or `go.sum` unless the maintainer explicitly authorizes a dependency or Go-version change.
+- Never remove an existing test or add a skip without maintainer approval and a specific reason. The verifier reports the identifiers for reviewed exceptions.
+- Never weaken a guardrail, grant an exception, bypass a hook, or edit evaluation fixtures to make a task pass. The maintainer owns those decisions.
 
-## Architecture Guidelines
+## Shared coding agent skills
 
-- Keep packages focused on clear responsibilities.
-- Prefer Go's existing interfaces, especially `http.Handler`.
-- Avoid circular dependencies.
-- Do not introduce new packages without a clear reason.
-- Use explicit error handling.
-- Avoid unnecessary global mutable state.
-- Keep concurrency understandable and race-free.
+Read only the relevant `SKILL.md` when needed.
 
-## Security
-
-Gorpx processes untrusted HTTP requests.
-
-- Do not blindly trust client-supplied forwarding headers.
-- Do not expose internal errors or sensitive information to clients.
-- Validate configuration and upstream destinations.
-- Preserve safe timeout and shutdown behaviour.
-- Do not expose arbitrary filesystem paths through static-file routes.
-- Avoid logging credentials, tokens, or request bodies.
-- Consider HTTP streaming and connection behaviour when modifying middleware.
-
-## Testing
-
-Add or update tests when modifying behaviour.
-
-Prefer standard Go testing tools and `net/http/httptest`.
-
-Run:
-
-```bash
-go fmt ./...
-go vet ./...
-go test -race ./...
-go build ./cmd/gorpx
-```
-
-Report any checks that could not be completed.
-
-## Working with the Maintainer
-
-The maintainer prioritises understanding the entire codebase.
-
-When proposing changes:
-
-1. Explain the problem and the proposed solution.
-2. Identify the files that need modification.
-3. Describe important design decisions and trade-offs.
-4. Prefer incremental changes over large rewrites.
-5. Explain non-obvious code and Go concepts.
-6. Clearly summarise what changed and how it was tested.
-
-Do not perform broad refactoring or introduce major architectural changes without explicit approval.
-
-## Scope
-
-Gorpx v0.1.0 is an experimental release.
-
-Do not introduce load balancing, automatic HTTPS, caching, plugin systems, or a management dashboard unless explicitly requested.
-
-Focus on stabilising the existing functionality.
-
-## Documentation
-
-Keep `README.md`, `docs/architecture.md`, and `docs/configuration.md` consistent with the implementation.
-
-Document actual behaviour rather than planned functionality.
-
-## License
-
-Gorpx is licensed under the ISC License. Preserve existing copyright and license notices.
+- `.agents/skills/http-handler/` for changes to routes, endpoints or middleware.
+- `.agents/skills/go-tests/` for focused Go tests and HTTP integration coverage.
+- `.agents/skills/code-review/` for a fresh-context diff review before handoff.

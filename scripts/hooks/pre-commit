@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# gorpx-managed-pre-commit
+set -euo pipefail
+
+repo=$(git rev-parse --show-toplevel)
+cd "$repo"
+protected=(
+    scripts/hooks/ scripts/install-hooks.sh scripts/verify.sh
+    scripts/guardrails/ evals/ .github/workflows/ LICENSE
+)
+if git diff --cached --quiet --no-renames HEAD -- "${protected[@]}"; then
+    :
+else
+    status=$?
+    if [[ $status == 1 ]]; then
+        echo "Pre-commit blocked changes to protected paths:" >&2
+        git diff --cached --name-only --no-renames HEAD -- "${protected[@]}" >&2
+    fi
+    exit "$status"
+fi
+
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/gorpx-index.XXXXXXXX")
+trap 'rm -rf "$snapshot"' EXIT
+git checkout-index --all --ignore-skip-worktree-bits --prefix="$snapshot/"
+bash "$snapshot/scripts/verify.sh" --staged "$repo"

@@ -1,0 +1,55 @@
+package server
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/alirezagholamii/gorpx/internal/config"
+)
+
+func TestHarnessHealthCacheRevision(t *testing.T) {
+	cfg := config.Default()
+	cfg.Routes = []config.Route{{Path: "/assets/", Root: t.TempDir()}}
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(srv.Handler)
+	t.Cleanup(httpServer.Close)
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req, err := http.NewRequest(method, httpServer.URL+"/health", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := httpServer.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantBody := "OK"
+		if method == http.MethodHead {
+			wantBody = ""
+		}
+		values := resp.Header.Values("Cache-Control")
+		if resp.StatusCode != http.StatusOK || string(body) != wantBody ||
+			len(values) != 1 || values[0] != "no-cache" || resp.Header.Get("X-Request-ID") == "" {
+			t.Errorf("%s /health: status=%d body=%q headers=%v", method, resp.StatusCode, body, resp.Header)
+		}
+	}
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Cache-Control"); got != "" {
+		t.Errorf("GET / Cache-Control = %q, want empty", got)
+	}
+}

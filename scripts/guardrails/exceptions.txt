@@ -1,0 +1,3 @@
+# Maintainer-reviewed exceptions, one per line: <identifier> <specific reason>
+# Copy the identifier from the verifier output after reviewing its change.
+new-skip:92c2beed5d245832f80e5bad Keep live model calls opt-in during the regular Go test suite.

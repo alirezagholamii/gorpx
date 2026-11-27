@@ -1,0 +1,9 @@
+{
+  "turns": [
+    "Improve Gorpx YAML loading diagnostics. When the first YAML decode fails (including an unknown field or malformed YAML), include the exact config path passed to config.Load in the returned error and preserve the underlying decode error for errors.As. Keep strict decoding, defaults, validation and the existing multi-document diagnostic. Scope changes to internal/config/loader.go and internal/config/loader_test.go. Add a focused test and run go test ./internal/config."
+  ],
+  "allowed_files": ["internal/config/loader.go", "internal/config/loader_test.go"],
+  "required_file": "internal/config/loader.go",
+  "check_package": "internal/config",
+  "required_command": "go test"
+}

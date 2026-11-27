@@ -10,57 +10,54 @@ Gorpx is a lightweight HTTP reverse proxy and web server written in Go.
 - Avoid unnecessary abstractions and dependencies.
 - Prioritise reliability, maintainability, and testability.
 
-## Project Structure
+See the [repository map](../AGENTS.md#repository-map) for package ownership.
 
-### `cmd/gorpx`
+## Startup and shutdown
 
-The application entry point.
+The CLI loads a single YAML document, rejects unknown fields, applies defaults,
+and validates the configuration. It passes the configuration to
+`server.NewWithHealth`, which assembles the HTTP server and returns any health
+runners for the configured proxy routes. The CLI binds the listener, starts the
+health runners, and serves requests.
 
-Responsibilities:
-
-- Initialise application configuration.
-- Initialise and start the HTTP server.
-- Handle application startup errors.
-
-### `internal/config`
-
-Manages application configuration.
-
-Responsibilities:
-
-- Define configuration structures.
-- Provide default values.
-- Eventually load and validate YAML configuration.
+On interrupt or termination, the CLI allows in-flight requests up to ten
+seconds to finish and closes the server if graceful shutdown fails. On exit
+from serving, it cancels the health runners and waits for them to stop.
 
 ## HTTP Request Lifecycle
 
-Currently, Gorpx handles requests using Go's `net/http` package.
+Gorpx applies the header size, header read timeout, and idle timeout through
+`net/http`. Requests that reach the handler pass through this chain.
 
 ```text
 Client
   |
   v
-HTTP Server
+net/http server
   |
   v
-ServeMux
+Logging -> Request ID -> Body size limit -> Body read deadline
   |
-  +-- GET /health --> 200 OK
+  v
+Server mux
   |
-  +-- GET / -------> Hello from Gorpx!
+  +-- GET / and HEAD /             -> built-in greeting
+  +-- GET /health and HEAD /health -> built-in health response
   |
-  +-- Unknown path -> 404 Not Found
+  +-- Other requests -> configured route mux
+                          +-- Static handler -> open files within the configured root
+                          +-- Proxy handler  -> select and forward to an upstream
+                          +-- No match       -> 404 Not Found
 ```
 
-## Planned Components
+The body read deadline applies to each read from the client. Static routes
+serve files under their configured roots. Proxy routes select upstreams in
+round-robin order and rebuild the forwarding headers. Optional active probes
+update which upstreams are eligible for selection. If no upstream is eligible,
+the proxy returns HTTP 503.
 
-The following packages will be introduced as needed:
-
-- `internal/server`: HTTP server lifecycle and graceful shutdown.
-- `internal/router`: Request routing.
-- `internal/proxy`: Reverse proxying to upstream services.
-- `internal/static`: Static file serving.
-- `internal/middleware`: Request logging and HTTP middleware.
+See the [configuration reference](configuration.md) for route syntax, limits,
+timeouts, and health-check settings.
 
 ## Testing
 

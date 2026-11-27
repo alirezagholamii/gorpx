@@ -2,3 +2,6 @@
 /gorpx
 /gorpx.exe
 /bin/
+
+# Local coding agent evaluation traces and diffs
+/evals/results/
