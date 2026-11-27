@@ -20,9 +20,11 @@ and validates the configuration. It passes the configuration to
 runners for the configured proxy routes. The CLI binds the listener, starts the
 health runners, and serves requests.
 
-On interrupt or termination, the CLI allows in-flight requests up to ten
-seconds to finish and closes the server if graceful shutdown fails. On exit
-from serving, it cancels the health runners and waits for them to stop.
+On interrupt or termination, the CLI stops accepting new connections and
+upgrades. In-flight HTTP requests and established upgrades share a ten-second
+grace period. Gorpx closes connections still open when the budget expires,
+including both ends of upgraded proxy sessions. On exit from serving, it
+cancels the health runners and waits for them to stop.
 
 ## HTTP Request Lifecycle
 
