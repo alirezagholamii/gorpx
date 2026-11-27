@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/alirezagholamii/gorpx/internal/config"
@@ -58,43 +56,15 @@ func NewWithHealth(
 
 		targets := make([]*url.URL, 0, len(route.Upstreams))
 
-		for _, upstream := range route.Upstreams {
-			target, err := url.Parse(upstream)
+		for i, upstream := range route.Upstreams {
+			target, err := config.ParseUpstreamURL(upstream)
 			if err != nil {
 				return nil, nil, fmt.Errorf(
-					"route %q: parse upstream %q: %w",
+					"route %q: invalid upstream #%d: %w",
 					route.Path,
-					upstream,
+					i+1,
 					err,
 				)
-			}
-
-			if (target.Scheme != "http" && target.Scheme != "https") ||
-				target.Hostname() == "" ||
-				target.User != nil ||
-				target.Opaque != "" ||
-				target.RawQuery != "" ||
-				target.ForceQuery ||
-				target.Fragment != "" ||
-				target.RawFragment != "" ||
-				(target.Path != "" && target.Path != "/") ||
-				strings.HasSuffix(target.Host, ":") {
-				return nil, nil, fmt.Errorf(
-					"route %q: invalid upstream %q",
-					route.Path,
-					upstream,
-				)
-			}
-
-			if port := target.Port(); port != "" {
-				number, err := strconv.Atoi(port)
-				if err != nil || number < 1 || number > 65535 {
-					return nil, nil, fmt.Errorf(
-						"route %q: invalid upstream port %q",
-						route.Path,
-						port,
-					)
-				}
 			}
 
 			targets = append(targets, target)

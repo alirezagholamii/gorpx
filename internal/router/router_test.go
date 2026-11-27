@@ -1,9 +1,11 @@
 package router
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -82,6 +84,72 @@ func TestRejectEquivalentEscapedRoutes(t *testing.T) {
 			}
 			if handler != nil {
 				t.Fatal("New() returned a handler for invalid routes")
+			}
+		})
+	}
+}
+
+func TestRejectedUpstreamDiagnostics(t *testing.T) {
+	const (
+		username = "example-user"
+		password = "example-pass"
+		token    = "example-token"
+	)
+
+	tests := []struct {
+		name    string
+		rawURL  string
+		wantErr string
+	}{
+		{
+			name:    "user information",
+			rawURL:  "https://" + username + ":" + password + "@example.invalid",
+			wantErr: `route "/api/": invalid upstream #2: user information is not allowed`,
+		},
+		{
+			name:    "malformed URL",
+			rawURL:  "https://" + username + ":" + password + "@example.invalid/%zz?token=" + token,
+			wantErr: `route "/api/": invalid upstream #2: malformed URL`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Routes = []config.Route{
+				{Path: "/api/", Upstreams: []string{"http://localhost:3000", tt.rawURL}},
+			}
+
+			configErr := config.Validate(cfg)
+			handler, runners, routerErr := NewWithHealth(cfg.Routes)
+			if handler != nil || len(runners) != 0 {
+				t.Error("NewWithHealth() returned a handler or runner for an invalid upstream")
+			}
+
+			for _, result := range []struct {
+				name string
+				err  error
+			}{
+				{"config.Validate", configErr},
+				{"NewWithHealth", routerErr},
+			} {
+				if result.err == nil {
+					t.Errorf("%s returned no error", result.name)
+					continue
+				}
+				message := result.err.Error()
+				if message != tt.wantErr {
+					t.Errorf("%s error = %q, want %q", result.name, message, tt.wantErr)
+				}
+				for _, value := range []string{tt.rawURL, username, password, token} {
+					if strings.Contains(message, value) {
+						t.Errorf("%s error exposed rejected URL data %q", result.name, value)
+					}
+				}
+				var parseErr *url.Error
+				if errors.As(result.err, &parseErr) {
+					t.Errorf("%s error wraps a URL parsing error", result.name)
+				}
 			}
 		})
 	}

@@ -176,6 +176,8 @@ Gorpx validates routes at startup.
 - `response_header_timeout` is allowed only on reverse-proxy routes.
 
 Invalid configurations cause Gorpx to return an error during startup.
+Errors for rejected upstream URLs include the route path, the upstream's
+one-based position in the list, and a reason. The URL itself is omitted.
 
 ### Breaking configuration change in v0.4.0
 
