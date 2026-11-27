@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -146,11 +147,12 @@ func Validate(cfg Config) error {
 			}
 		}
 
-		for _, upstream := range route.Upstreams {
-			if err := validateUpstreamURL(upstream); err != nil {
+		for i, upstream := range route.Upstreams {
+			if _, err := ParseUpstreamURL(upstream); err != nil {
 				return fmt.Errorf(
-					"route %q: %w",
+					"route %q: invalid upstream #%d: %w",
 					route.Path,
+					i+1,
 					err,
 				)
 			}
@@ -226,34 +228,40 @@ func ValidateRouteHealthCheck(route Route) error {
 	return nil
 }
 
-func validateUpstreamURL(rawURL string) error {
+// ParseUpstreamURL parses and validates an upstream URL for config and routing.
+// Its errors are safe to log because they contain only fixed reasons.
+func ParseUpstreamURL(rawURL string) (*url.URL, error) {
 	target, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid upstream %q: %w", rawURL, err)
+		// The parser error can contain the raw URL and other input details.
+		return nil, errors.New("malformed URL")
 	}
 
-	if (target.Scheme != "http" && target.Scheme != "https") ||
-		target.Hostname() == "" ||
-		target.User != nil ||
-		target.Opaque != "" ||
-		target.RawQuery != "" ||
-		target.ForceQuery ||
-		target.Fragment != "" ||
-		target.RawFragment != "" ||
-		(target.Path != "" && target.Path != "/") {
-		return fmt.Errorf("invalid upstream %q", rawURL)
-	}
-
-	if strings.HasSuffix(target.Host, ":") {
-		return fmt.Errorf("invalid upstream %q: empty port", rawURL)
+	switch {
+	case target.User != nil:
+		return nil, errors.New("user information is not allowed")
+	case target.Scheme != "http" && target.Scheme != "https":
+		return nil, errors.New("scheme must be HTTP or HTTPS")
+	case target.Opaque != "":
+		return nil, errors.New("opaque URLs are not allowed")
+	case target.Hostname() == "":
+		return nil, errors.New("hostname is required")
+	case target.RawQuery != "" || target.ForceQuery:
+		return nil, errors.New("query strings are not allowed")
+	case target.Fragment != "" || target.RawFragment != "":
+		return nil, errors.New("fragments are not allowed")
+	case target.Path != "" && target.Path != "/":
+		return nil, errors.New("custom base paths are not allowed")
+	case strings.HasSuffix(target.Host, ":"):
+		return nil, errors.New("empty port")
 	}
 
 	if port := target.Port(); port != "" {
 		number, err := strconv.Atoi(port)
 		if err != nil || number < 1 || number > 65535 {
-			return fmt.Errorf("invalid upstream %q: invalid port %q", rawURL, port)
+			return nil, errors.New("port must be between 1 and 65535")
 		}
 	}
 
-	return nil
+	return target, nil
 }
