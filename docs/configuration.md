@@ -164,8 +164,9 @@ Only use directories containing files intended for public access.
 
 Gorpx validates routes at startup.
 
-- Route paths must start and end with `/`.
-- Route paths must use supported literal-prefix syntax; wildcard patterns are rejected.
+- Route paths must start and end with `/`. The root prefix `/` is valid.
+- Route paths cannot contain spaces, tabs, `.` or `..` segments, or repeated slashes.
+- Route paths use literal prefixes. Wildcard patterns and percent escapes are rejected.
 - Duplicate route paths are rejected.
 - Each route must define exactly one of `upstreams` or `root`.
 - The `upstreams` list must contain at least one URL.
