@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build release archives
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      revision: ${{ steps.version.outputs.revision }}
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          revision=$(git rev-parse HEAD)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Release tags must have the form vMAJOR.MINOR.PATCH." >&2
+              exit 1
+            fi
+            version="$GITHUB_REF_NAME"
+          else
+            version="dev-${revision:0:12}"
+          fi
+          printf 'value=%s\nrevision=%s\n' "$version" "$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build and package binaries
+        shell: bash
+        env:
+          PACKAGE_DIR: ${{ runner.temp }}/gorpx-release
+          VERSION: ${{ steps.version.outputs.value }}
+          REVISION: ${{ steps.version.outputs.revision }}
+        run: |
+          build_dir=$(mktemp -d)
+          trap 'rm -rf "$build_dir"' EXIT
+          export BUILD_DIR="$build_dir"
+
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64; do
+            mkdir "$build_dir/$target"
+            binary="$build_dir/$target/gorpx"
+            if [[ "$target" == windows_* ]]; then
+              binary+=".exe"
+            fi
+            CGO_ENABLED=0 GOOS="${target%_*}" GOARCH="${target#*_}" \
+              go build -trimpath -mod=readonly -buildvcs=true -o "$binary" ./cmd/gorpx
+
+            if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+              go version -m "$binary" | awk -v version="$VERSION" -v revision="$REVISION" '
+                $1 == "mod" && $3 == version { tagged = 1 }
+                $1 == "build" && $2 == "vcs.revision=" revision { same_commit = 1 }
+                $1 == "build" && $2 == "vcs.modified=false" { clean = 1 }
+                END { exit !(tagged && same_commit && clean) }
+              ' || { echo "Unexpected Go build metadata for $target." >&2; exit 1; }
+            fi
+          done
+
+          # Fix timestamps, member order, and permissions for repeatable archives.
+          mkdir "$PACKAGE_DIR"
+          python3 - <<'PY'
+          import gzip
+          import os
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          build_dir = Path(os.environ["BUILD_DIR"])
+          package_dir = Path(os.environ["PACKAGE_DIR"])
+          version = os.environ["VERSION"]
+          for target in sorted(build_dir.iterdir()):
+              executable = next(target.iterdir())
+              members = [(Path("LICENSE"), 0o644), (executable, 0o755)]
+              stem = f"gorpx_{version}_{target.name}"
+              if executable.suffix == ".exe":
+                  with zipfile.ZipFile(package_dir / f"{stem}.zip", "w") as archive:
+                      for path, mode in members:
+                          entry = zipfile.ZipInfo(path.name)
+                          entry.create_system = 3
+                          entry.external_attr = (0o100000 | mode) << 16
+                          archive.writestr(entry, path.read_bytes(), zipfile.ZIP_DEFLATED)
+              else:
+                  with (package_dir / f"{stem}.tar.gz").open("wb") as output:
+                      with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
+                          with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+                              for path, mode in members:
+                                  entry = tarfile.TarInfo(path.name)
+                                  entry.mode = mode
+                                  entry.size = path.stat().st_size
+                                  with path.open("rb") as contents:
+                                      archive.addfile(entry, contents)
+          PY
+
+          cd "$PACKAGE_DIR"
+          export LC_ALL=C
+          sha256sum gorpx_* > SHA256SUMS
+
+      - name: Upload release archives
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gorpx-release-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/gorpx-release
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: release
+          merge-multiple: true
+
+      - name: Verify checksums
+        working-directory: release
+        run: sha256sum -c SHA256SUMS
+
+      - name: Publish release with assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ needs.build.outputs.revision }}
+        shell: bash
+        run: |
+          tag_revision=$(gh api "repos/$GH_REPO/commits/tags/$GITHUB_REF_NAME" --jq .sha)
+          if [[ "$tag_revision" != "$REVISION" ]]; then
+            echo "The remote tag no longer points to the built commit." >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes release/gorpx_* release/SHA256SUMS
