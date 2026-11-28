@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -46,23 +47,33 @@ func Default() Config {
 	}
 }
 
-func ValidateRoutePath(path string) error {
-	if !strings.HasPrefix(path, "/") ||
-		!strings.HasSuffix(path, "/") {
-		return fmt.Errorf("invalid route path: %q", path)
+func ValidateRoutePath(prefix string) error {
+	if !strings.HasPrefix(prefix, "/") ||
+		!strings.HasSuffix(prefix, "/") {
+		return fmt.Errorf("invalid route path: %q", prefix)
 	}
 
-	if strings.ContainsAny(path, "{}") {
+	if strings.ContainsAny(prefix, "{}") {
 		return fmt.Errorf(
 			"route path %q must not contain wildcard syntax",
-			path,
+			prefix,
 		)
 	}
 
 	// ServeMux unescapes pattern segments, so differently spelled paths
 	// such as /api/ and /%61pi/ would otherwise conflict at registration.
-	if strings.Contains(path, "%") {
-		return fmt.Errorf("route path %q must not contain percent escapes", path)
+	if strings.Contains(prefix, "%") {
+		return fmt.Errorf("route path %q must not contain percent escapes", prefix)
+	}
+
+	if strings.ContainsAny(prefix, " \t") {
+		return fmt.Errorf("route path %q must not contain spaces or tabs", prefix)
+	}
+
+	// Restore the subtree slash after cleaning, including for the root prefix.
+	cleanPrefix := strings.TrimSuffix(path.Clean(prefix), "/") + "/"
+	if prefix != cleanPrefix {
+		return fmt.Errorf("route path %q must not contain dot segments or repeated slashes", prefix)
 	}
 
 	return nil

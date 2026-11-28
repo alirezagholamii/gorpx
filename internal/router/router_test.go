@@ -89,6 +89,50 @@ func TestRejectEquivalentEscapedRoutes(t *testing.T) {
 	}
 }
 
+func TestRoutePrefixValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		prefix  string
+		wantErr string
+	}{
+		{"space", "/api v1/", "must not contain spaces or tabs"},
+		{"tab", "/api\tv1/", "must not contain spaces or tabs"},
+		{"current directory", "/api/./v1/", "must not contain dot segments or repeated slashes"},
+		{"parent directory", "/api/../v1/", "must not contain dot segments or repeated slashes"},
+		{"repeated interior slash", "/api//v1/", "must not contain dot segments or repeated slashes"},
+		{"repeated trailing slash", "/api//", "must not contain dot segments or repeated slashes"},
+		{"repeated root slash", "//", "must not contain dot segments or repeated slashes"},
+		{"root", "/", ""},
+		{"canonical subtree", "/api/v1.2/", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Routes = []config.Route{
+				{Path: tt.prefix, Upstreams: []string{"http://localhost:3000"}},
+			}
+
+			configErr := config.Validate(cfg)
+			handler, routerErr := New(cfg.Routes)
+			if tt.wantErr == "" {
+				if configErr != nil || routerErr != nil || handler == nil {
+					t.Fatalf("config.Validate() = %v, New() = %v, %v; want a handler and no errors", configErr, handler, routerErr)
+				}
+				return
+			}
+
+			want := fmt.Sprintf("route path %q %s", tt.prefix, tt.wantErr)
+			if configErr == nil || configErr.Error() != want {
+				t.Errorf("config.Validate() = %v, want %q", configErr, want)
+			}
+			if routerErr == nil || routerErr.Error() != want || handler != nil {
+				t.Errorf("New() = %v, %v; want a nil handler and %q", handler, routerErr, want)
+			}
+		})
+	}
+}
+
 func TestRejectedUpstreamDiagnostics(t *testing.T) {
 	const (
 		username = "example-user"
