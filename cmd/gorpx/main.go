@@ -65,6 +65,7 @@ func serve(
 		return fmt.Errorf("listen on %s: %w", srv.Addr, err)
 	}
 
+	shutdown := server.TrackUpgrades(srv)
 	healthCtx, cancelHealth := context.WithCancel(context.Background())
 
 	var wg sync.WaitGroup
@@ -111,12 +112,8 @@ func serve(
 	)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		shutdownErr := fmt.Errorf("graceful shutdown failed: %w", err)
-		if err := srv.Close(); err != nil {
-			return errors.Join(shutdownErr, fmt.Errorf("force-close HTTP server: %w", err))
-		}
-		return shutdownErr
+	if err := shutdown(shutdownCtx); err != nil {
+		return err
 	}
 
 	if err := <-serverErr; err != nil {

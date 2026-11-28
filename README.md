@@ -13,7 +13,7 @@ Built for simplicity, Gorpx provides configurable routing, structured logging, a
 - YAML configuration
 - Static file serving
 - Structured request logging
-- Graceful shutdown
+- Graceful shutdown for HTTP requests and upgraded connections
 - Basic upstream error handling
 - Optional active upstream health checks
 
