@@ -77,22 +77,29 @@ all five builds using the existing `v0.5.0` tag in a temporary checkout,
 archive contents and permissions, and a stubbed publish step with both a
 matching and a moved tag. The repository verifier passed.
 
+### Task 4. GitHub-hosted rehearsal
+
+[PR #17](https://github.com/alirezagholamii/gorpx/pull/17) passed CI and
+landed on `main` as `b57d502acf81`. The
+[manual rehearsal](https://github.com/alirezagholamii/gorpx/actions/runs/46158353361)
+built all five targets and skipped the publish job. Downloaded the Actions
+artifact and verified the archive names, SHA-256 checksums, executable and
+license contents, and embedded target and commit metadata for every binary.
+
+### Task 5. Binary installation
+
+[README.md](../../README.md#install-a-release-binary) covers platform
+selection, SHA-256 verification, extraction, and adding the binary to
+`PATH` on Linux, macOS, and Windows. It also covers starting Gorpx with a
+local config and building from source.
+
+Checked all five rehearsal archives against the published manifest. Ran the
+macOS arm64 installation steps and used the README config to serve a static
+file over loopback. The PowerShell steps were reviewed against Microsoft's
+cmdlet documentation.
+
 ## Failed / Dead Ends
 
 - The local sandbox denied writes to Go's module version stat cache. Each
   build exited successfully and retained the expected Git revision and clean
   tree metadata, as well as a Go-generated module pseudo-version.
-
-## Next Steps
-
-- [ ] **Task 4. Run a GitHub-hosted rehearsal.** With approval, push the
-  changes and make the workflow available on the default branch, which
-  GitHub requires for manual dispatch. Download the workflow artifact and
-  verify all five archive names, contents, build metadata, and SHA-256
-  checksums. Confirm the publish job was skipped.
-- [ ] **Task 5. Document binary installation.** Cover platform selection,
-  checksum verification, extraction, adding the executable to `PATH`, and
-  running Gorpx with a config file.
-
-Tasks 1 through 3 are complete locally. The GitHub-hosted rehearsal awaits
-approval to push and land the workflow on the default branch.
